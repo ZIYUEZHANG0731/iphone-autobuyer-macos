@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
                 if i==4:side.addSpacing(16)
                 self.label(side,'购买设置' if i==0 else '运行','sectionTitle')
             b=QPushButton(title);b.setObjectName('nav');b.setIcon(outline_icon(['box','store','person','card','sliders','document','browser'][i]));b.setIconSize(QSize(18,18));b.setCheckable(True);b.setAutoExclusive(True);b.toggled.connect(lambda checked,index=i:self.stack.setCurrentIndex(index) if checked else None);side.addWidget(b);self.nav.append(b)
-        side.addStretch();self.label(side,'v0.6.3','muted')
+        side.addStretch();self.label(side,'v0.6.4','muted')
         outer.addWidget(sidebar);outer.addWidget(self.stack,1)
         self.build_product();self.build_stores();self.build_profiles();self.build_payments();self.build_console();self.build_logs();self.build_browser()
         self.stack.currentChanged.connect(self.page_changed);self.nav[4].setChecked(True);self.stack.setCurrentIndex(4)

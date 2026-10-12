@@ -31,6 +31,8 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         window=MainWindow(Path(sys.argv[1]))
         window.show()
         info=window.ensure_embedded()
+        assert window.embedded_browser.profile.httpAcceptLanguage()=='zh-CN,zh;q=0.9'
+        assert not window.embedded_browser.profile.isOffTheRecord()
         window.stack.setCurrentIndex(6)
         phase=sys.argv[2]
 
@@ -51,10 +53,12 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     await session.context.route('**/*',fixture)
                     await session.page.goto('https://autobuyer.invalid/embedded')
                     assert await session.page.get_by_role('heading',name='Offline embedded fixture').count()==1
+                    assert await session.page.evaluate('navigator.languages')==['zh-CN','zh']
                     if phase=='save':await session.page.get_by_role('button',name='Save fixture').click()
                     assert await session.page.evaluate("document.cookie.includes('fixture_session=synthetic') && document.cookie.includes('fixture_persistent=synthetic')")
                     background=await session.new_page()
                     await background.goto('https://autobuyer.invalid/background')
+                    assert await background.evaluate('navigator.languages')==['zh-CN','zh']
                     assert background is not session.page and not session.page.is_closed()
                     await session.close_page(background)
                     await asyncio.sleep(.1)

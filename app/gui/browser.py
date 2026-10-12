@@ -51,6 +51,10 @@ class EmbeddedBrowser(QWidget):
         self.profile = QWebEngineProfile('AppleAutoBuyer', self)
         self.profile.setPersistentStoragePath(str(profile_root/'storage'))
         self.profile.setCachePath(str(profile_root/'cache'))
+        # Qt can combine the system language and region into zh-DE. Use an
+        # ordinary China Store language preference before creating pages so
+        # HTTP and navigator.languages agree, without changing browser identity.
+        self.profile.setHttpAcceptLanguage('zh-CN,zh;q=0.9')
         self.profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies)
         self.profile.downloadRequested.connect(lambda download: download.cancel())
         self.bridge = TabBridge(self)
