@@ -1,0 +1,20 @@
+{
+  "product": {
+    "name": "iPhone 17",
+    "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17",
+    "options": {"dimensionColor": "white", "dimensionCapacity": "256gb"},
+    "quantity": 1,
+    "max_total": "7000.00",
+    "region": "中国大陆",
+    "exclude_trade_in": true,
+    "exclude_applecare": true
+  },
+  "stores": [
+    {"name": "Apple 南京东路", "city": "上海", "enabled": true, "store_id": "R359", "province": "上海", "district": "黄浦区"},
+    {"name": "Apple 上海环贸 iapm", "city": "上海", "enabled": true, "store_id": "R401", "province": "上海", "district": "黄浦区"}
+  ],
+  "payments": ["招商银行"],
+  "installment_months": 24,
+  "auto_submit": false,
+  "transmit_identity": false
+}

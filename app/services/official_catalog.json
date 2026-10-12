@@ -1,0 +1,307 @@
+{
+  "checked_at": "2026-10-12T00:37:17.816516+00:00",
+  "source": "Apple China public rendered store",
+  "discovered_link_count": 4,
+  "read_page_count": 4,
+  "category_pages": [],
+  "products": [
+    {
+      "name": "iPhone Duo",
+      "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo",
+      "groups": [
+        {
+          "key": "dimensionColor",
+          "title": "颜色",
+          "choices": [
+            {
+              "value": "starwhite",
+              "label": "星光白色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "nightsky",
+              "label": "夜空色",
+              "disabled_when_read": false
+            }
+          ]
+        },
+        {
+          "key": "dimensionCapacity",
+          "title": "容量",
+          "choices": [
+            {
+              "value": "256gb",
+              "label": "256GB",
+              "disabled_when_read": false,
+              "price": "15999.00"
+            },
+            {
+              "value": "512gb",
+              "label": "512GB",
+              "disabled_when_read": false,
+              "price": "17999.00"
+            },
+            {
+              "value": "1tb",
+              "label": "1TB",
+              "disabled_when_read": false,
+              "price": "21499.00"
+            },
+            {
+              "value": "2tb",
+              "label": "2TB",
+              "disabled_when_read": false,
+              "price": "26499.00"
+            }
+          ]
+        }
+      ],
+      "preorder_note": "10 月 16 日晚 8 点接受预购。10 月 23 日发售。",
+      "observed_at": "2026-10-12T00:37:04.017404+00:00",
+      "base_price": "15999.00"
+    },
+    {
+      "name": "iPhone 17",
+      "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17",
+      "groups": [
+        {
+          "key": "dimensionColor",
+          "title": "颜色",
+          "choices": [
+            {
+              "value": "lavender",
+              "label": "薰衣草紫色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "mistblue",
+              "label": "青雾蓝色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "white",
+              "label": "白色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "sage",
+              "label": "鼠尾草绿色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "black",
+              "label": "黑色",
+              "disabled_when_read": false
+            }
+          ]
+        },
+        {
+          "key": "dimensionCapacity",
+          "title": "容量",
+          "choices": [
+            {
+              "value": "256gb",
+              "label": "256GB",
+              "disabled_when_read": false,
+              "price": "6799.00"
+            },
+            {
+              "value": "512gb",
+              "label": "512GB",
+              "disabled_when_read": false,
+              "price": "8799.00"
+            }
+          ]
+        }
+      ],
+      "preorder_note": "",
+      "observed_at": "2026-10-12T00:37:13.388977+00:00",
+      "base_price": "6799.00"
+    },
+    {
+      "name": "iPhone 17e",
+      "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e",
+      "groups": [
+        {
+          "key": "dimensionColor",
+          "title": "颜色",
+          "choices": [
+            {
+              "value": "soft_pink",
+              "label": "浅粉色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "white",
+              "label": "白色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "black",
+              "label": "黑色",
+              "disabled_when_read": false
+            }
+          ]
+        },
+        {
+          "key": "dimensionCapacity",
+          "title": "容量",
+          "choices": [
+            {
+              "value": "256gb",
+              "label": "256GB",
+              "disabled_when_read": false,
+              "price": "5299.00"
+            },
+            {
+              "value": "512gb",
+              "label": "512GB",
+              "disabled_when_read": false,
+              "price": "7299.00"
+            }
+          ]
+        }
+      ],
+      "preorder_note": "",
+      "observed_at": "2026-10-12T00:37:17.437418+00:00",
+      "base_price": "5299.00"
+    },
+    {
+      "name": "iPhone 18 Pro",
+      "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro",
+      "groups": [
+        {
+          "key": "dimensionColor",
+          "title": "颜色",
+          "choices": [
+            {
+              "value": "burgundy",
+              "label": "勃艮第酒红色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "glacier",
+              "label": "冰川蓝色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "silver",
+              "label": "银色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "black",
+              "label": "黑色",
+              "disabled_when_read": false
+            }
+          ]
+        },
+        {
+          "key": "dimensionCapacity",
+          "title": "容量",
+          "choices": [
+            {
+              "value": "256gb",
+              "label": "256GB",
+              "disabled_when_read": false,
+              "price": "9999.00"
+            },
+            {
+              "value": "512gb",
+              "label": "512GB",
+              "disabled_when_read": false,
+              "price": "11999.00"
+            },
+            {
+              "value": "1tb",
+              "label": "1TB",
+              "disabled_when_read": false,
+              "price": "15499.00"
+            },
+            {
+              "value": "2tb",
+              "label": "2TB",
+              "disabled_when_read": false,
+              "price": "20499.00"
+            }
+          ]
+        }
+      ],
+      "preorder_note": "",
+      "observed_at": "2026-10-12T00:37:08.038334+00:00",
+      "base_price": "9999.00",
+      "locked_options": {
+        "dimensionScreensize": "6_3inch"
+      }
+    },
+    {
+      "name": "iPhone 18 Pro Max",
+      "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro",
+      "groups": [
+        {
+          "key": "dimensionColor",
+          "title": "颜色",
+          "choices": [
+            {
+              "value": "burgundy",
+              "label": "勃艮第酒红色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "glacier",
+              "label": "冰川蓝色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "silver",
+              "label": "银色",
+              "disabled_when_read": false
+            },
+            {
+              "value": "black",
+              "label": "黑色",
+              "disabled_when_read": false
+            }
+          ]
+        },
+        {
+          "key": "dimensionCapacity",
+          "title": "容量",
+          "choices": [
+            {
+              "value": "256gb",
+              "label": "256GB",
+              "disabled_when_read": false,
+              "price": "10999.00"
+            },
+            {
+              "value": "512gb",
+              "label": "512GB",
+              "disabled_when_read": false,
+              "price": "12999.00"
+            },
+            {
+              "value": "1tb",
+              "label": "1TB",
+              "disabled_when_read": false,
+              "price": "16499.00"
+            },
+            {
+              "value": "2tb",
+              "label": "2TB",
+              "disabled_when_read": false,
+              "price": "21499.00"
+            }
+          ]
+        }
+      ],
+      "preorder_note": "",
+      "observed_at": "2026-10-12T00:37:08.038334+00:00",
+      "base_price": "9999.00",
+      "locked_options": {
+        "dimensionScreensize": "6_9inch"
+      }
+    }
+  ],
+  "unread_pages": []
+}
