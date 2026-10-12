@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
-from app.models.config import State, Store, Settings, ConfigError, money
+from app.models.config import State, Store, Settings, money
 
 class FlowError(Exception):
     """Only fixed, public error messages; do not wrap Playwright messages with PII."""

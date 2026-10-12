@@ -5,14 +5,13 @@ import hashlib
 import re
 from datetime import datetime, timedelta, date, timezone
 from email.utils import parsedate_to_datetime
-from decimal import Decimal
 from zoneinfo import ZoneInfo
-from urllib.parse import urlsplit, urljoin
+from urllib.parse import urlsplit
 from pathlib import Path
 from uuid import uuid4
 from playwright.async_api import Page, Locator, expect, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
-from app.models.config import Settings, Store, Identity, Mode, apple_url, money
-from app.models.flow import FlowError, UserAction, Unavailable, RateLimited, Availability, Summary, Receipt, SubmissionUnknown
+from app.models.config import Store, Mode, apple_url, money
+from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, Receipt, SubmissionUnknown
 from app.automation.control import Control
 from app.services.payment import PaymentStore
 from app.services.pricing import quote_key
@@ -669,7 +668,6 @@ class AppleAdapter:
                 unqueried={(s.province,s.city) for group in groups[city_index+1:] for s in group}
                 pending_indices=[index for index,s in enumerate(preferred) if (s.province,s.city) in unqueried]
                 if selected_indices and (not pending_indices or min(selected_indices)<min(pending_indices)):break
-            self.cached_availability=result
             self.progress('stores',[{'name':a.store.name,'store_id':a.store.store_id,'city':a.store.city,'province':a.store.province,'district':a.store.district,'available':a.available,'quote':a.quote} for a in result])
             return result
         except PlaywrightError:
@@ -743,7 +741,6 @@ class AppleAdapter:
                     except ValueError: pass
             store=self.store_directory.enrich(Store(name=lines[0],city=lines[1].split(',')[0] if len(lines)>1 else '',store_id=c['id']))
             result.append(Availability(store,available,quote,when))
-        self.cached_availability=result
         self.progress('stock_query',{'completed_at':datetime.now(timezone.utc).isoformat(),
             'elapsed':round(asyncio.get_running_loop().time()-query_started,2),'store_count':len(result)})
         if publish:self.progress('stores',[{'name':a.store.name,'store_id':a.store.store_id,'city':a.store.city,'province':a.store.province,'district':a.store.district,'available':a.available,'quote':a.quote} for a in result])

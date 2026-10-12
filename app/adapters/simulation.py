@@ -1,10 +1,8 @@
 from __future__ import annotations
 import json
 from decimal import Decimal
-from dataclasses import asdict
-from urllib.parse import urlsplit
 from playwright.async_api import TimeoutError as PlaywrightTimeout
-from app.models.config import Store,Identity
+from app.models.config import Store
 from app.models.flow import FlowError,UserAction,RateLimited,Availability,Summary,Receipt,SubmissionUnknown
 
 class SimulationAdapter:

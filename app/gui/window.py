@@ -10,10 +10,11 @@ import math
 import time
 from PySide6.QtCore import Qt,QTimer,Slot,QDateTime,QDate,QTime,QTimeZone,QSize,QLocale,QEventLoop
 from PySide6.QtGui import QColor,QIcon,QPainter,QPixmap
-from PySide6.QtWidgets import (QMainWindow,QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QGridLayout,QLayout,
+from PySide6.QtWidgets import (QMainWindow,QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QLayout,
  QFormLayout,QStackedWidget,QScrollArea,QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QCheckBox,QDateTimeEdit,
  QTableWidget,QTableWidgetItem,QHeaderView,QListWidget,QListWidgetItem,QAbstractItemView,QPlainTextEdit,QTabWidget,
- QFileDialog,QMessageBox,QInputDialog,QSystemTrayIcon,QProgressBar,QDialog,QDialogButtonBox,QSizePolicy,QApplication)
+ QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QDialogButtonBox,QSizePolicy,QApplication)
+from app import __version__
 from app.models.config import Settings,Product,Store,Identity,Mode,State,STATE_LABELS,ConfigError
 from app.models.flow import FlowError
 from app.services.storage import Repository
@@ -78,7 +79,7 @@ class ProfileDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self,root:Path):
         super().__init__();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
-        self.worker=None;self.closing=False;self.catalog_cache=CatalogCache(root);self.catalog=self.catalog_cache.load();self.store_results=[];self.option_controls=[];self.run_events=[]
+        self.worker=None;self.closing=False;self.catalog_cache=CatalogCache(root);self.catalog=self.catalog_cache.load();self.store_results=[];self.run_events=[]
         self.embedded_browser=None;self.pending_browser_action=None
         self.store_directory=StoreDirectory()
         self.payment_store=PaymentStore(root);self.payment_dialog=None
@@ -101,7 +102,7 @@ class MainWindow(QMainWindow):
                 if i==4:side.addSpacing(16)
                 self.label(side,'购买设置' if i==0 else '运行','sectionTitle')
             b=QPushButton(title);b.setObjectName('nav');b.setIcon(outline_icon(['box','store','person','card','sliders','document','browser'][i]));b.setIconSize(QSize(18,18));b.setCheckable(True);b.setAutoExclusive(True);b.toggled.connect(lambda checked,index=i:self.stack.setCurrentIndex(index) if checked else None);side.addWidget(b);self.nav.append(b)
-        side.addStretch();self.label(side,'v0.6.4','muted')
+        side.addStretch();self.label(side,f'v{__version__}','muted')
         outer.addWidget(sidebar);outer.addWidget(self.stack,1)
         self.build_product();self.build_stores();self.build_profiles();self.build_payments();self.build_console();self.build_logs();self.build_browser()
         self.stack.currentChanged.connect(self.page_changed);self.nav[4].setChecked(True);self.stack.setCurrentIndex(4)
@@ -137,7 +138,7 @@ class MainWindow(QMainWindow):
         l=self.page('选择商品','选机型、颜色和容量，官网入口由软件准备。')
         row=QHBoxLayout();source=self.label(row,'型号与配置来自 Apple 中国大陆官网','muted');source.setWordWrap(False);row.addStretch();self.button(row,'更新官网型号与配置',lambda:self.launch('catalog'));l.addLayout(row)
         frame,c=self.card();self.product_choices=ProductChoices(self.catalog);c.addWidget(self.product_choices)
-        self.name=self.product_choices.model;self.quantity=self.product_choices.quantity;self.catalog_combo=self.name
+        self.name=self.product_choices.model;self.quantity=self.product_choices.quantity
         self.url=QLineEdit(self);self.url.hide();self.name.currentIndexChanged.connect(self.catalog_selected)
         self.no_trade=QCheckBox('不折抵换购');self.no_care=QCheckBox('不加 AppleCare+');row=QHBoxLayout();row.addWidget(self.no_trade);row.addWidget(self.no_care);row.addStretch();c.addLayout(row);l.addWidget(frame)
         self.label(l,'新机型还没有购买入口时，可先保存计划。软件会从官网目录识别入口并等待开售。','muted');l.addStretch()
@@ -693,7 +694,7 @@ class MainWindow(QMainWindow):
         if kind=='catalog':
             self.catalog=data;self.catalog_cache.save(data);self.product_choices.replace_offers(data);self.catalog_selected(self.name.currentIndex())
         elif kind=='options':
-            self.option_controls=data;groups=groups_from_controls(data)
+            groups=groups_from_controls(data)
             if groups:
                 offer=deepcopy(self.product_choices.offer);offer['groups']=groups
                 self.product_choices.show_offer(offer,self.product_choices.selected_options())

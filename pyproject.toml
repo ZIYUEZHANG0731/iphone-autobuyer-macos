@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apple-autobuyer"
-version = "0.6.4"
+dynamic = ["version"]
 description = "macOS Apple Store preparation, website dry run and guarded automation"
 requires-python = ">=3.12"
 dependencies = ["PySide6==6.11.2", "playwright==1.63.0", "keyring==25.7.0"]
@@ -17,6 +17,9 @@ apple-autobuyer = "app.main:main"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "app.__version__"}
 
 [tool.setuptools.package-data]
 "app.gui" = ["*.qss"]

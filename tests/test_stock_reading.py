@@ -173,7 +173,6 @@ async def test_critical_rejection_while_modal_opens_keeps_rate_limit_reason(brow
 async def test_stock_query_after_checkout_does_not_return_a_cached_inventory(browser):
     context,page,config,queries=await stock_fixture(browser)
     adapter=AppleAdapter(page,Control(False));adapter.cart_checked=True
-    adapter.cached_availability=[]
     try:
         with pytest.raises(UserAction):
             await adapter.availability(config)

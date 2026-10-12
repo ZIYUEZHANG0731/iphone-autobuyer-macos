@@ -1,7 +1,9 @@
 from pathlib import Path
+from runpy import run_path
 from PyInstaller.utils.hooks import collect_data_files
 
 root=Path(SPECPATH)
+release=run_path(str(root/'app/__init__.py'))
 datas=collect_data_files('playwright')+[
     (str(root/'app/gui/theme.qss'),'app/gui'),
     (str(root/'app/services/sim_store.html'),'app/services'),
@@ -21,7 +23,7 @@ coll=COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='iPhone AutoBuyer
 app=BUNDLE(coll,name='iPhone AutoBuyer.app',icon=str(root/'app/gui/icon.icns'),
     bundle_identifier='com.autobuyer.apple.desktop',info_plist={
     'CFBundleDisplayName':'iPhone AutoBuyer',
-    'CFBundleShortVersionString':'0.6.4','CFBundleVersion':'25',
+    'CFBundleShortVersionString':release['__version__'],'CFBundleVersion':str(release['__build__']),
     'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'13.0',
     'NSHumanReadableCopyright':'Apple AutoBuyer — local purchasing preparation tool',
     })

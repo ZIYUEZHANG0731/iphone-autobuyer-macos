@@ -3,7 +3,6 @@ import argparse
 import asyncio
 from dataclasses import asdict
 import json
-import os
 from pathlib import Path
 import sys
 

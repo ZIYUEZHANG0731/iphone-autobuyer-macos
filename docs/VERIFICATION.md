@@ -4,6 +4,14 @@
 
 ## 环境与可运行产物
 
+### v0.6.5 单独精简与回归
+
+- 以已推送的内置登录修复提交 **`1aef13b`** 为回退基线。精简合并借用浏览器连接的退出清理和任务 adapter 初始化，移除 17 个未使用的导入名称、未读取的库存缓存、旧商品控件字段及别名。动态读取的刷新时间、浏览器种类、当前 adapter 和 Qt 窗口引用经搜索确认保留。精简是单独提交，可仅撤销该提交，保留语言修复与用户资料。
+- Python 包、界面及 macOS bundle 统一读取 `app/__init__.py` 的版本信息；实际 setuptools metadata 与 bundle Info.plist 均为 **0.6.5 / build 26**。记录 `package-v065-build26-metadata.txt` 与 `build-v065-build26.log`。
+- 精简后完整回归 **339 passed / 123.98 秒**，记录 `pytest-v065-build26-full.txt`、`tests-v065-build26-full.xml`。既有检查覆盖独立 Chrome 正常关闭/重连、内置 profile 保存与断开、日常 Chrome 不关闭用户 context、取货与付款流程、提交锁及脱敏。未出现回归，无需回撤。
+- 打包 GUI 与内置 renderer 自检 **GUI_SMOKE_OK / EMBEDDED_SMOKE_OK，均退出 0**；已检查 GUI 截图，版本正确。严格签名及安装核验通过，实际安装版显示 **v0.6.5 / build 26**，安装前后全部保存的配置完全一致。记录 `packaged-v065-build26-gui-smoke.log`、`packaged-v065-build26-embedded-smoke.log`、`install-v065-build26.log`。
+- 最终安装版沿用原内置 profile，新账户文档 **18:12:16 UTC / GET 200**，软件 **18:12:17 UTC** 显示“当前浏览器登录已确认”、北京时间 10-13 02:12:17。认证提交数 **0**、诊断捕获错误数 **0**，记录 `apple-login-v065-build26-embedded-restored.json`，权限 0600、Git 忽略。源码精简与软件正常更新均未丢失该会话。
+
 ### v0.6.4 内置浏览器语言与实际登录
 
 - 安装 **v0.6.4 / build 25** 后，内置浏览器由 `zh-DE` 改为 `zh-CN,zh`。用户在同一软件内完成真实认证和双重验证，商店回调成功；随后账户认证返回 **18:03:20 UTC / 200**、账户文档 **18:03:23 UTC / GET 200**，新账户复核 **18:03:59 UTC / GET 200**，软件显示登录已确认。409 / hsa2 仅作为进入双重认证，未当作登录成功。记录 `apple-login-v064-build25-embedded-actual.json`，权限 0600、Git 忽略。

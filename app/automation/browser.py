@@ -189,24 +189,10 @@ class BrowserSession:
         return self.page
 
     async def __aexit__(self,*_):
-        if self.daily_bridge:
-            # Browser.close on this supported connection only disconnects the
-            # relay. Never close the user's context, pages or Chrome process.
-            try:
-                if self.browser:
-                    try:await self.browser.close()
-                    except Exception:pass
-            finally:
-                await self.daily_bridge.close()
-                if self.playwright:await self.playwright.stop()
-            return
-        if self.embedded:
-            # The GUI owns the page/profile. Detach the worker, retaining login;
-            # destroy the disk-based profile on orderly application shutdown.
-            if self.browser:
-                try:await self.browser.close()
-                except Exception:pass
-            if self.playwright:await self.playwright.stop()
+        if self.daily_bridge or self.embedded:
+            # These connections borrow a browser owned by Chrome/the GUI.
+            # Disconnect only: do not close its context, tabs or process.
+            await self._close_connection()
             return
         if self.chrome_owner and self.browser and self.browser.is_connected():
             # Close only the recovered app-owned process, never daily Chrome.
@@ -240,10 +226,13 @@ class BrowserSession:
                 await self.context.close()
             except Exception:
                 pass
-        if self.browser:
-            try:
-                await self.browser.close()
-            except Exception:
-                pass
-        if self.playwright:
-            await self.playwright.stop()
+        await self._close_connection()
+
+    async def _close_connection(self):
+        try:
+            if self.browser:
+                try:await self.browser.close()
+                except Exception:pass
+        finally:
+            if self.daily_bridge:await self.daily_bridge.close()
+            if self.playwright:await self.playwright.stop()

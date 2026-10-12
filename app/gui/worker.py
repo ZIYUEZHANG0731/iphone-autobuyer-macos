@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 from copy import deepcopy
-from datetime import datetime, timezone
 import platform
 from pathlib import Path
 import queue
@@ -14,7 +13,7 @@ import math
 from playwright.async_api import Error as PlaywrightError
 from urllib.parse import urlsplit
 from PySide6.QtCore import QThread, Signal
-from app.models.config import Mode, Identity, ConfigError, apple_url
+from app.models.config import Mode, Identity, ConfigError
 from app.models.flow import FlowError, UserAction, Stopped, RateLimited
 from app.automation.control import Control, ProcessLock
 from app.automation.browser import BrowserSession, installed_chrome
@@ -213,21 +212,17 @@ class Worker(QThread):
             return credential
         login_options=dict(login_config=self.config,credential_provider=read_credential,
                            sign_in=self.sign_in,page_focus=getattr(session,'focus_page',None))
+        mode = Mode.LIVE if self.action == 'live' else Mode.WEBSITE_DRY_RUN
         if self.action in ('website', 'live'):
             self.review_data = {}
-            mode = Mode.WEBSITE_DRY_RUN if self.action == 'website' else Mode.LIVE
             identity = IdentityVault().get(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
             if identity:
                 repo.redactor.register(identity)
-            adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
-            self.active_adapter = adapter
-            try:
-                return asdict(await Engine(repo, self.control, callback=self.event.emit, lock_held=True).run(self.config, adapter, mode, identity))
-            finally:
-                adapter.detach()
-        adapter = AppleAdapter(session.page, self.control, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
+        adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
         self.active_adapter = adapter
         try:
+            if self.action in ('website', 'live'):
+                return asdict(await Engine(repo, self.control, callback=self.event.emit, lock_held=True).run(self.config, adapter, mode, identity))
             if self.action == 'catalog':
                 result=await read_catalog(adapter,on_progress=lambda count,name:self.status(f'已从官网更新 {count} 个机型：{name}'))
                 items = result['products']
