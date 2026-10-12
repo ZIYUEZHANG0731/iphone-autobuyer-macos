@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apple-autobuyer"
-version = "0.5.3"
+version = "0.6.0"
 description = "macOS Apple Store preparation, website dry run and guarded automation"
 requires-python = ">=3.12"
 dependencies = ["PySide6==6.11.2", "playwright==1.63.0", "keyring==25.7.0"]
@@ -20,7 +20,7 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 "app.gui" = ["*.qss"]
-"app.services" = ["*.html", "*.json"]
+"app.services" = ["*.html", "*.json", "*.cjs"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

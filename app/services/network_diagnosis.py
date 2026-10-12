@@ -143,7 +143,7 @@ def response_shape(text: str, content_type: str) -> dict:
 
 class NetworkDiagnosis:
     def __init__(self, root: Path, kind: str, *, progress=None):
-        self.kind = 'embedded' if kind == 'embedded' else 'chrome'
+        self.kind = kind if kind in ('embedded','daily_chrome') else 'chrome'
         self.path = Path(root) / f'login-diagnostic-{self.kind}.json'
         self.progress = progress or (lambda *_: None)
         self.context = None
@@ -324,6 +324,8 @@ class NetworkDiagnosis:
             pass
 
     async def close(self):
+        if self.context is None:
+            return
         if self.sampler:
             self.sampler.cancel()
             await asyncio.gather(self.sampler, return_exceptions=True)

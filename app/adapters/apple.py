@@ -19,9 +19,9 @@ from app.services.pricing import quote_key
 from app.services.catalog import exact_product_link,preorder_time
 from app.services.catalog_reader import public_links
 from app.services.consent import matches_saved_notice, NOTICE_VERSION
-from app.services.login import (ACCOUNT_ENTRY, STORE_ENTRY, LOGOUT_LABEL, account_page_url,
-    apple_auth_url, shop_signin_url, store_page_url, session_page_url, show_store_bag,
-    follow_store_account, visible_login_form)
+from app.services.login import (STORE_ENTRY, LOGOUT_LABEL, account_page_url,
+    apple_auth_url, shop_signin_url, store_page_url, show_store_bag,
+    follow_store_account, visible_login_form, account_check_url, authenticated_account_page)
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
 from copy import deepcopy
@@ -315,7 +315,7 @@ class AppleAdapter:
             elif store_page_url(page.url) and not bag_checked:
                 bag_checked=True
                 if await follow_store_account(page):continue
-            if session_page_url(page.url) and await logout.count():
+            if await authenticated_account_page(page):
                 self.progress('login',{'authenticated':True,'status':'authenticated','checked_at':datetime.now(timezone.utc).isoformat()})
                 return True
             if await visible_login_form(page):
@@ -396,7 +396,8 @@ class AppleAdapter:
         account.on('response',self._response)
         try:
             try:
-                response=None if keep else await account.goto(ACCOUNT_ENTRY,wait_until='domcontentloaded',timeout=5000)
+                target = await account_check_url(self.page) if not keep else None
+                response=None if keep else await account.goto(target,wait_until='domcontentloaded',timeout=5000)
             except PlaywrightError:
                 self.progress('login',{'authenticated':None,'checked_at':datetime.now(timezone.utc).isoformat(),'reason':'账户页暂时无法连接；沿用现有会话，结账时再检查'})
                 return None

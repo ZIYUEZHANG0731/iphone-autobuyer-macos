@@ -55,7 +55,7 @@ async def run_cli(args):
     else:
         config=Settings.from_dict(json.loads(args.config.read_text(encoding='utf-8'))) if args.config else repo.load_config()
         config.auto_submit=False;config.transmit_identity=False
-        async with BrowserSession(root,headless=args.headless) as session:
+        async with BrowserSession(root,headless=args.headless,kind=config.browser_kind) as session:
             cooldown=SiteCooldown(root)
             if cooldown.remaining():raise FlowError(f'官网访问暂需等待 {cooldown.remaining()} 秒；本次不发送新请求')
             control=Control(interactive=False,site_cooldown=cooldown)

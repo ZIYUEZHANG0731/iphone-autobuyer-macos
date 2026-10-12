@@ -36,6 +36,7 @@ from app.gui.widgets import outline_icon,divider,section_header
 from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_VERSION, PRIVACY_POLICY_URL
 from app.services.stores import StoreDirectory
 from app.services.network_diagnosis import FAMILY_LABELS
+from app.services.daily_chrome import EXTENSION_URL
 from app.utils.qt import single_shot
 
 class ProfileDialog(QDialog):
@@ -99,7 +100,7 @@ class MainWindow(QMainWindow):
                 if i==4:side.addSpacing(16)
                 self.label(side,'购买设置' if i==0 else '运行','sectionTitle')
             b=QPushButton(title);b.setObjectName('nav');b.setIcon(outline_icon(['box','store','person','card','sliders','document','browser'][i]));b.setIconSize(QSize(18,18));b.setCheckable(True);b.setAutoExclusive(True);b.toggled.connect(lambda checked,index=i:self.stack.setCurrentIndex(index) if checked else None);side.addWidget(b);self.nav.append(b)
-        side.addStretch();self.label(side,'v0.5.3','muted')
+        side.addStretch();self.label(side,'v0.6.0','muted')
         outer.addWidget(sidebar);outer.addWidget(self.stack,1)
         self.build_product();self.build_stores();self.build_profiles();self.build_payments();self.build_console();self.build_logs();self.build_browser()
         self.stack.currentChanged.connect(self.page_changed);self.nav[4].setChecked(True);self.stack.setCurrentIndex(4)
@@ -247,8 +248,9 @@ class MainWindow(QMainWindow):
         right=QWidget();r=QVBoxLayout(right);r.setContentsMargins(0,4,0,0);r.setSpacing(12)
         r.addLayout(section_header('软件浏览器'));r.addWidget(divider())
         self.login_label=self.label(r,'登录状态：未检查','sessionStatus')
-        self.browser_label=self.label(r,'请使用软件自己的浏览器登录。','muted')
-        self.browser_kind=QComboBox();self.browser_kind.setAccessibleName('官网浏览器模式');self.browser_kind.addItem('软件内置浏览器','embedded');self.browser_kind.addItem('独立 Chrome · 保留原有登录','chrome');r.addWidget(self.browser_kind)
+        self.browser_label=self.label(r,'可接入日常 Chrome，沿用已登录的官网会话。','muted')
+        self.browser_kind=QComboBox();self.browser_kind.setAccessibleName('官网浏览器模式');self.browser_kind.addItem('软件内置浏览器','embedded');self.browser_kind.addItem('独立 Chrome · 软件专用会话','chrome');self.browser_kind.addItem('日常 Chrome · 沿用现有登录','daily_chrome');r.addWidget(self.browser_kind)
+        row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome);r.addLayout(row)
         row=QHBoxLayout();self.button(row,'登录并保持会话',lambda:self.launch('login'))
         self.button(row,'打开浏览器',self.focus_browser);r.addLayout(row)
         row=QHBoxLayout();self.button(row,'检查登录状态',lambda:self.launch('login_check'))
@@ -332,6 +334,8 @@ class MainWindow(QMainWindow):
         self.browser_layout.addLayout(account_row)
         row=QHBoxLayout();self.button(row,'内嵌登录 Apple 账户',self.login_embedded,'primary');self.button(row,'已完成登录，检查',self.complete_browser_login)
         self.button(row,'检查登录状态',lambda:self.launch('login_check'));self.button(row,'记录登录问题',lambda:self.launch('login_diagnosis'));row.addStretch();self.browser_layout.addLayout(row)
+        row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome,'primary');self.button(row,'安装 Chrome 连接扩展…',self.open_chrome_extension);row.addStretch();self.browser_layout.addLayout(row)
+        self.label(self.browser_layout,'日常 Chrome：先在官网正常登录，再通过 Microsoft 官方 Playwright 扩展选择一个 Apple 中国商店页面。关闭软件会话会断开连接，Chrome 和原有登录继续保留。','muted')
         self.browser_session_note=self.label(self.browser_layout,'登录诊断会随实际运行的浏览器记录；切换浏览器需要先关闭当前会话。','muted')
         self.browser_holder=QWidget();self.browser_holder_layout=QVBoxLayout(self.browser_holder);self.browser_holder_layout.setContentsMargins(0,0,0,0)
         self.browser_placeholder=self.label(self.browser_holder_layout,'点击“内嵌登录 Apple 账户”打开官网。登录完成后可回控制台设置开售时间。','muted');self.browser_holder_layout.addStretch();self.browser_layout.addWidget(self.browser_holder,1)
@@ -383,6 +387,25 @@ class MainWindow(QMainWindow):
                 self.launch('login');return
             self.pending_browser_action='login';self.browser_kind.setCurrentIndex(self.browser_kind.findData('embedded'));self.close_session();return
         self.browser_kind.setCurrentIndex(self.browser_kind.findData('embedded'));self.launch('login')
+
+    def connect_daily_chrome(self):
+        if self.worker and self.worker.isRunning():
+            if not self.worker.idle:
+                self.message_label.setText('请先停止当前任务，再接入日常 Chrome。');return
+            if getattr(self.worker,'session_kind','')!='daily_chrome':
+                self.pending_browser_action='login_check';self.browser_kind.setCurrentIndex(self.browser_kind.findData('daily_chrome'));self.close_session();return
+        self.browser_kind.setCurrentIndex(self.browser_kind.findData('daily_chrome'));self.launch('login_check')
+
+    def open_chrome_extension(self):
+        from PySide6.QtCore import QProcess
+        from app.automation.browser import installed_chrome
+        chrome=installed_chrome()
+        if not chrome:
+            QMessageBox.information(self,'Chrome 连接扩展','请先安装 Google Chrome，再从官网浏览器页面安装官方扩展。');return
+        # Open the official listing in the everyday profile. The user decides
+        # whether to grant the extension's debugger permission in Chrome.
+        started,_=QProcess.startDetached(str(chrome),[EXTENSION_URL])
+        self.message_label.setText('请在日常 Chrome 审阅并安装 Microsoft 官方 Playwright Extension，再点“接入日常 Chrome”。' if started else '未能打开 Chrome，请手动在 Chrome Web Store 搜索 Playwright Extension（Microsoft）。')
 
     def complete_browser_login(self):
         if self.worker and self.worker.isRunning() and not self.worker.idle:self.resume()
@@ -607,7 +630,7 @@ class MainWindow(QMainWindow):
         except (ConfigError,ValueError) as exc:QMessageBox.information(self,'请检查配置',str(exc));return
         self.clear_consent()
         if running:
-            if bool(getattr(self.worker,'embedded',None))!=(config.browser_kind=='embedded'):
+            if getattr(self.worker,'session_kind','embedded' if getattr(self.worker,'embedded',None) else 'chrome')!=config.browser_kind:
                 self.message_label.setText('当前会话仍在使用原来的浏览器。请关闭会话，再按所选模式打开。');return
             if not self.worker.enqueue(action,config):
                 self.message_label.setText('先点“关闭会话”，再安装浏览器或运行本地异常测试。');return
@@ -666,7 +689,7 @@ class MainWindow(QMainWindow):
         elif kind=='browser':
             self.browser_label.setText(data['name'])
             self.browser_session_note.setText('当前运行与诊断：'+data['name'])
-            if data.get('kind') in ('embedded','chrome'):
+            if data.get('kind') in ('embedded','chrome','daily_chrome'):
                 self.browser_kind.setCurrentIndex(self.browser_kind.findData(data['kind']))
         elif kind=='price_confirmation':self.show_price_choice(data)
         elif kind=='price_confirmed':self.console_log.appendPlainText(f'已接受本次官网价格：RMB {float(data["amount"]):,.2f}')

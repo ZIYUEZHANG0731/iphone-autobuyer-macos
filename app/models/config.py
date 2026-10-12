@@ -175,8 +175,8 @@ class Settings:
             raise ConfigError("缺货策略须为等待或停止")
         if self.checkout_strategy not in ('account_then_guest', 'account_only', 'guest'):
             raise ConfigError('请选择有效的结账登录策略')
-        if self.browser_kind not in ('embedded', 'chrome'):
-            raise ConfigError('请选择内置浏览器或独立 Chrome 会话')
+        if self.browser_kind not in ('embedded', 'chrome', 'daily_chrome'):
+            raise ConfigError('请选择内置浏览器、独立 Chrome 或日常 Chrome')
         for key in ("auto_submit", "transmit_identity", "privacy_policy_accepted", "privacy_transfer_acknowledged", "allow_other_stores", "keep_awake", "auto_login", "trust_browser"):
             if type(getattr(self, key)) is not bool:
                 raise ConfigError("开关配置格式不正确")

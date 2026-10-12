@@ -4,6 +4,18 @@
 
 ## 环境与可运行产物
 
+### v0.6.0 日常 Chrome 连接
+
+- build 20 完整源码 **298 passed / 109.74 秒**；构建、严格签名核验、打包 GUI 和内嵌 renderer 自检均通过。记录 `pytest-v060-build20-final.txt`、`tests-v060-build20-final.xml`、`build-v060-build20.log`、`packaged-v060-build20-smoke.log`、`install-v060-build20.log`。已实际安装，看到 v0.6.0、原 Duo、六家自提店和招商银行 24 期计划。安装脚本不改应用数据；用户操作期间浏览器模式发生变化，其他配置与此前快照一致，未覆盖用户的新选择。
+- 用户自行安装官方 Playwright Extension 并授权选定 Apple 页面，实际连接建立；日常 Chrome 显示客户端标签组和连接图标。这是扩展握手实测，不是合成连接冒充真实 Chrome。
+- build 20 新打开通用账户入口后提示登录，但已选页面可以打开真实订单列表。订单列表没有可见退出链接，原判断无法确认；新离线复现 **2 failed**，记录 `order-session-before-fix-build21.txt`。build 21 修改检查入口和明确订单列表的认证证据，真实安装版结果另行补充。没有提交新订单、付款或再次提交密码。
+- 连接运输协议的离线测试使用固定 Playwright 1.63.0 的真实服务端及 Python 客户端、临时合成浏览器。必须使用共享服务模式才暴露既有默认上下文；正常连接保留选定页面，拒绝无安装、多个页面、非中国站、无效本地端点，停止待授权连接只结束软件自己的 Node。此测试与扩展握手、Apple 认证单独记录。
+- 系统代理开关关闭但 Surge 网络扩展激活的观察仅本机保存于 `network-extension-state-v060.json`；不能据此判定实际 Apple 路由或宣称根因确定。
+- build 21 首次完整回归 **306 passed / 1 failed / 117.95 秒**：新增失效会话夹具使用服务器 302，而 Playwright 仅拦截重定向链首个请求；改为完全拦截的独立文档导航。修正后的订单会话检查 **9 passed / 4.24 秒**，分别确认当前节点的新 GET、无退出链接的订单列表、真正失效、非法/不同源/相似路径链接、明确登录表单优先及保存登录的返回识别。记录 `order-session-after-fix-build21.txt`，完整最终回归另记。
+- build 21 最终完整源码 **307 passed / 113.49 秒**，记录 `pytest-v060-build21-final-fixed.txt`、`tests-v060-build21-final-fixed.xml`。合成测试全部拦截浏览器请求；真实账户复核在实际安装版另记。
+- build 21 构建、严格签名核验及打包自检通过，`GUI_SMOKE_OK` / `EMBEDDED_SMOKE_OK`，退出码均为 0。记录 `build-v060-build21.log`、`packaged-v060-build21-smoke.log`、`install-v060-build21.log`；已实际安装确认版本 0.6.0 / build 21，安装前后全部配置一致。旧版正常关闭软件会话后经 Cmd-Q 退出，进程结束；日常 Chrome 原有订单列表仍打开。当前新连接页已准备，浏览器规则要求在此敏感访问授权时当场确认，尚未由代理代点或完成 build 21 的真实账户复核。
+- 用户明确确认旧版同一个软件 Chrome 在开启回国 VPN 后进行新的密码验证并成功，随后关闭 VPN 恢复 Codex 连接。这是用户完成的同窗口网络对照，没有本次成功请求链，不能记作 build 21 自动登录测试或据此保证 541 已解决。本次未改动 VPN/代理；软件代码未配置代理或另一套 Apple 私有认证接口。
+
 ### v0.5.3 中国区认证诊断与旧版对照
 
 - build 19 构建、安装及严格签名核验通过；打包 GUI 与内嵌 renderer 自检退出 0，分别输出 `GUI_SMOKE_OK`、`EMBEDDED_SMOKE_OK`。记录 `build-v053-build19.log`、`packaged-v053-build19-smoke.log`、`install-v053-build19.log`。实际安装窗口已看到唯一北京时间标签及原 Duo、六家门店、招商银行 24 期计划；没有开始购买或新认证。配置只迁移显示时区，重开后的摘要哈希与迁移后相同。旧窗口辅助功能读取持续超时，更新前经系统退出列表关闭；配置和诊断已保留，本轮不把重开成功解释成所有卡死已修复。

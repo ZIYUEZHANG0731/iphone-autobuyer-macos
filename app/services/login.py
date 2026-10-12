@@ -24,8 +24,50 @@ def store_page_url(url):
 def session_page_url(url):
     # Store menus can remember a name even when authenticated access expired.
     # Confirm a protected account/order return, not the remembered menu alone.
-    return account_page_url(url) or (
-        apple_url(url) and urlsplit(url).path.rstrip('/') == '/shop/order/list')
+    return account_page_url(url) or order_list_url(url)
+
+
+def order_list_url(url):
+    return apple_url(url) and urlsplit(url).path.rstrip('/') == '/shop/order/list'
+
+
+def order_detail_url(url):
+    return apple_url(url) and bool(re.fullmatch(
+        r'/shop/order/detail/[A-Za-z0-9_-]+/W\d+', urlsplit(url).path.rstrip('/')))
+
+
+async def account_check_url(page):
+    """Use the selected page's normal protected entry, without changing nodes."""
+    if session_page_url(page.url):
+        return page.url
+    if order_detail_url(page.url):
+        orders = page.get_by_role('link', name=re.compile(r'^查看你的订单')).filter(visible=True)
+        if await orders.count() == 1:
+            href = await orders.get_attribute('href')
+            target = urljoin(page.url, href) if href else ''
+            if order_list_url(target) and urlsplit(target).hostname == urlsplit(page.url).hostname:
+                return target
+    return ACCOUNT_ENTRY
+
+
+async def authenticated_account_page(page):
+    """Require protected account evidence, never a remembered Store menu."""
+    if not session_page_url(page.url) or await visible_login_form(page):
+        return False
+    if await page.get_by_role('link', name=LOGOUT_LABEL).filter(visible=True).count():
+        return True
+    if not order_list_url(page.url):
+        return False
+    heading = page.get_by_role('heading', name=re.compile(r'^你已订购的产品[。.]?$')).filter(visible=True)
+    if await heading.count() != 1:
+        return False
+    orders = page.get_by_role('link', name=re.compile(r'\bOrder\s+W\d+\b')).filter(visible=True)
+    # Only the normal, same-origin detail links in the actual order list count.
+    for href in await orders.evaluate_all('(links) => links.map(link => link.getAttribute("href"))'):
+        target = urljoin(page.url, href) if href else ''
+        if order_detail_url(target) and urlsplit(target).hostname == urlsplit(page.url).hostname:
+            return True
+    return False
 
 
 async def show_store_bag(page, *, timeout=5000):

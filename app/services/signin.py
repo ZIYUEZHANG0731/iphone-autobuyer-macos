@@ -7,8 +7,8 @@ from playwright.async_api import Error as PlaywrightError
 
 from app.models.config import apple_url
 from app.models.flow import UserAction
-from app.services.login import (LOGOUT_LABEL, apple_auth_url, shop_signin_url,
-    store_page_url, session_page_url, follow_store_account)
+from app.services.login import (apple_auth_url, shop_signin_url,
+    store_page_url, follow_store_account, authenticated_account_page)
 
 
 ACCOUNT_LABEL = re.compile(r'Apple\s*(账户|ID)|电子邮件|邮件地址|邮箱|电话号码|Email|phone', re.I)
@@ -134,10 +134,9 @@ class SignInController:
         if not apple_url(page.url):
             return False
         path = urlsplit(page.url).path
-        logout=page.get_by_role('link',name=LOGOUT_LABEL).filter(visible=True)
         if store_page_url(page.url):
             if await follow_store_account(page):return False
-        if session_page_url(page.url) and await logout.count():
+        if await authenticated_account_page(page):
             self.authenticated(config.credential_id)
             return True
         if path.rstrip('/') == '/shop/checkout':

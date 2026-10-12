@@ -21,7 +21,7 @@ def installed_chrome() -> Path | None:
 
 
 class BrowserSession:
-    def __init__(self, root: Path, *, headless=False, isolated=False, embedded=None):
+    def __init__(self, root: Path, *, headless=False, isolated=False, embedded=None, kind='chrome', stop_check=None):
         self.root = root
         self.headless = headless
         self.isolated = isolated
@@ -36,6 +36,20 @@ class BrowserSession:
         self.chrome_owner = None
         self.chrome_executable = None
         self.chrome_profile = None
+        self.kind = kind
+        self.stop_check = stop_check
+        self.daily_bridge = None
+
+    async def _start_daily_chrome(self):
+        from app.services.daily_chrome import DailyChromeBridge, selected_apple_page
+        self.daily_bridge = DailyChromeBridge(stop_check=self.stop_check)
+        endpoint = await self.daily_bridge.start()
+        self.browser = await self.playwright.chromium.connect(endpoint, timeout=10000)
+        if len(self.browser.contexts) != 1:
+            raise FlowError('Chrome 连接未提供唯一会话，请重新选择 Apple 页面')
+        self.context = self.browser.contexts[0]
+        self.page = selected_apple_page(self.context.pages)
+        self.label = '日常 Chrome（沿用原有登录）'
 
     async def _start_chrome(self, executable: Path):
         # Use Chrome's supported local connection and a private, app-owned
@@ -85,6 +99,10 @@ class BrowserSession:
             if self.isolated:
                 self.browser = await self.playwright.chromium.launch(headless=self.headless)
                 self.context = await self.browser.new_context(locale="zh-CN",timezone_id="Asia/Shanghai",service_workers="block")
+            elif self.kind == 'daily_chrome':
+                if self.headless:
+                    raise FlowError('接入日常 Chrome 需要在扩展中选择官网页面')
+                await self._start_daily_chrome()
             elif self.embedded and not self.headless:
                 # Qt queues its first blank navigation during initialization.
                 # Wait for it before any real navigation can be overwritten.
@@ -103,7 +121,9 @@ class BrowserSession:
                     handle_sigint=False,handle_sigterm=False,handle_sighup=False,
                 )
             # No trace, HAR, videos or storage_state dumps; checkout can contain identities.
-            if self.embedded and not self.headless:
+            if self.kind == 'daily_chrome' and not self.isolated:
+                pass  # Preserve the exact tab selected in the approval page.
+            elif self.embedded and not self.headless:
                 self.page=await self.target_page(self.embedded['primary_id'])
             elif self.recovered:
                 pages=[p for p in self.context.pages if not p.is_closed()]
@@ -169,6 +189,17 @@ class BrowserSession:
         return self.page
 
     async def __aexit__(self,*_):
+        if self.daily_bridge:
+            # Browser.close on this supported connection only disconnects the
+            # relay. Never close the user's context, pages or Chrome process.
+            try:
+                if self.browser:
+                    try:await self.browser.close()
+                    except Exception:pass
+            finally:
+                await self.daily_bridge.close()
+                if self.playwright:await self.playwright.stop()
+            return
         if self.embedded:
             # The GUI owns the page/profile. Detach the worker, retaining login;
             # destroy the disk-based profile on orderly application shutdown.

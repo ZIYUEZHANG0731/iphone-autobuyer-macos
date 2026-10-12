@@ -41,6 +41,18 @@ def test_new_account_permission_is_an_explicit_checkbox(qt):
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
 
 
+def test_daily_chrome_button_selects_connection_and_checks_login(qt,tmp_path,monkeypatch):
+    window=MainWindow(tmp_path)
+    calls=[]
+    try:
+        before=window.repo.load_config().browser_kind
+        monkeypatch.setattr(window,'launch',lambda action:calls.append((action,window.browser_kind.currentData())))
+        window.connect_daily_chrome()
+        assert calls==[('login_check','daily_chrome')]
+        assert window.repo.load_config().browser_kind==before
+    finally:window.close();window.deleteLater();qt.processEvents()
+
+
 def test_gui_saves_credentials_to_vault_and_only_reference_to_sqlite(qt,tmp_path,monkeypatch):
     import app.gui.window as module
     stored={}

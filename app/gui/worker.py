@@ -52,6 +52,7 @@ class Worker(QThread):
         self.captured_orders = set()
         self.session_open=False
         self.embedded=embedded
+        self.session_kind=''
         self.sign_in=SignInController()
         self.limited_until=time.monotonic()+self.control.site_cooldown.remaining()
         self.busy_until=time.monotonic()+self.control.site_cooldown.busy_remaining()
@@ -100,6 +101,11 @@ class Worker(QThread):
         self.data.emit(kind, data)
 
     async def environment(self):
+        if self.config.browser_kind=='daily_chrome':
+            from app.services.daily_chrome import extension_installed
+            installed=extension_installed()
+            return {'state':'COMPLETED','message':f'macOS {platform.mac_ver()[0]} · {platform.machine()}\n日常 Chrome · '+('官方连接扩展已安装，请接入后复核官网登录' if installed else '请从官网浏览器页面安装官方 Playwright Extension'),
+                    'browser_installed':bool(installed_chrome() and installed)}
         if self.config.browser_kind=='embedded':
             from importlib.util import find_spec
             available=find_spec('PySide6.QtWebEngineWidgets') is not None
@@ -142,12 +148,17 @@ class Worker(QThread):
         # One process stays open through login, setup and the scheduled run.
         # This retains session-only cookies, which may disappear on a restart.
         with ProcessLock(repo.path.with_suffix('.run.lock')):
-            async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless,embedded=self.embedded) as session:
+            if self.config.browser_kind=='daily_chrome':
+                self.status('请在日常 Chrome 的官方扩展连接页选择 Apple 中国商店页面并允许本次连接…')
+            async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless,embedded=self.embedded,
+                    kind=self.config.browser_kind,stop_check=self.control.check_session) as session:
                 self.session_open=True
-                browser_kind='embedded' if session.embedded else 'chrome'
+                browser_kind='daily_chrome' if self.config.browser_kind=='daily_chrome' else 'embedded' if session.embedded else 'chrome'
+                self.session_kind=browser_kind
                 self.data.emit('browser',{'name':session.label,'kind':browser_kind})
                 diagnosis=NetworkDiagnosis(self.root,browser_kind,progress=self.progress)
-                await diagnosis.start(session.context,session.page)
+                if browser_kind!='daily_chrome' or self.action=='login_diagnosis':
+                    await diagnosis.start(session.context,session.page)
                 watcher = asyncio.create_task(self.watch_payment(session, repo))
                 try:
                     while True:
@@ -155,6 +166,8 @@ class Worker(QThread):
                         self.control.resume_event.clear()
                         try:
                             self.control.check()
+                            if self.action=='login_diagnosis' and diagnosis.context is None:
+                                await diagnosis.start(session.context,session.page)
                             result = await self.browser_action(session, repo)
                         except Stopped:
                             if self.control.stop_event.is_set():

@@ -7,6 +7,7 @@ datas=collect_data_files('playwright')+[
     (str(root/'app/services/sim_store.html'),'app/services'),
     (str(root/'app/services/official_catalog.json'),'app/services'),
     (str(root/'app/services/official_stores.json'),'app/services'),
+    (str(root/'app/services/daily_chrome_bridge.cjs'),'app/services'),
 ]
 a=Analysis([str(root/'app/main.py')],pathex=[str(root)],binaries=[],datas=datas,
     hiddenimports=['keyring.backends.macOS','keyring.backends.macOS.api','PySide6.QtWebEngineCore','PySide6.QtWebEngineWidgets'],
@@ -20,7 +21,7 @@ coll=COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='iPhone AutoBuyer
 app=BUNDLE(coll,name='iPhone AutoBuyer.app',icon=str(root/'app/gui/icon.icns'),
     bundle_identifier='com.autobuyer.apple.desktop',info_plist={
     'CFBundleDisplayName':'iPhone AutoBuyer',
-    'CFBundleShortVersionString':'0.5.3','CFBundleVersion':'19',
+    'CFBundleShortVersionString':'0.6.0','CFBundleVersion':'21',
     'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'13.0',
     'NSHumanReadableCopyright':'Apple AutoBuyer — local purchasing preparation tool',
     })
