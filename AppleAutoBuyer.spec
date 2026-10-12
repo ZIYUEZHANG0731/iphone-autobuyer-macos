@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 root=Path(SPECPATH)
 release=run_path(str(root/'app/__init__.py'))
+native=run_path(str(root/'scripts/build_accessibility.py'))['build_cocoa_accessibility'](root)
 datas=collect_data_files('playwright')+[
     (str(root/'app/gui/theme.qss'),'app/gui'),
     (str(root/'app/services/sim_store.html'),'app/services'),
@@ -12,7 +13,7 @@ datas=collect_data_files('playwright')+[
     (str(root/'app/services/official_stores.json'),'app/services'),
     (str(root/'app/services/daily_chrome_bridge.cjs'),'app/services'),
 ]
-a=Analysis([str(root/'app/main.py')],pathex=[str(root)],binaries=[],datas=datas,
+a=Analysis([str(root/'app/main.py')],pathex=[str(root)],binaries=[(str(native),'app/platforms/native')] if native else [],datas=datas,
     hiddenimports=['PySide6.QtWebEngineCore','PySide6.QtWebEngineWidgets'] + {
         'darwin':['keyring.backends.macOS','keyring.backends.macOS.api'],
         'win32':['keyring.backends.Windows'],

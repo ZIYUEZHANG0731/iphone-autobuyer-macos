@@ -49,9 +49,9 @@ def preparation_items(config: Settings, *, mode: Mode = Mode.LIVE,
     profile = bool(config.profile_id and config.profile_id in profile_ids)
     identity_ready = profile and config.transmit_identity
     add('identity', '取货人和填写授权', 'ready' if identity_ready else 'manual' if mode == Mode.WEBSITE_DRY_RUN else 'missing',
-        '已选择保存的取货人并允许填写；运行时由 Keychain 再次检查资料' if identity_ready
+        '已填写本次取货资料并允许向 Apple 填写，不读取钥匙串' if identity_ready
         else '官网试跑会暂停，允许在官网手动填写' if mode == Mode.WEBSITE_DRY_RUN
-        else '先保存并选择默认取货人，再在付款页允许向 Apple 填写', 2 if not profile else 3,
+        else '在软件填写取货人或导入 TXT，再允许向 Apple 填写', 2 if not profile else 3,
         '设置取货人' if not profile else '设置填写授权')
 
     payments = bool(config.payments and all(p.strip() for p in config.payments))
@@ -89,7 +89,7 @@ def preparation_items(config: Settings, *, mode: Mode = Mode.LIVE,
     add('login', '预登录会话', 'ready' if verified or guest else 'unknown',
         '选择了无需预登录的游客策略；实际仍可能要求手机验证码' if guest else
         '最近 10 分钟内确认登录，软件浏览器仍打开；官网仍可能要求认证' if verified
-        else '已预选钥匙串自动登录；需提前完成首次验证，Apple 仍可能再次要求验证码' if config.auto_login
+        else '已预选使用本次填写的账号密码；需提前完成首次验证，Apple 仍可能再次要求验证码' if config.auto_login
         else '登录暂未确认；结账出现登录页时按游客备用继续，手机验证仍可能暂停' if fallback
         else '现有会话需复核，请提前登录；失效时按设置等待重新登录', 4,
         '检查登录状态' if session_open else '登录并保持会话')

@@ -20,7 +20,7 @@ from app.models.flow import FlowError
 from app.services.storage import Repository
 from app.services.simulation import SCENARIOS
 from app.security.privacy import Redactor
-from app.security.vault import settings_for_disk
+from app.security.vault import IdentityVault, settings_for_disk
 from app.gui.worker import Worker
 from app.gui.browser_controls import BrowserControls
 from app.gui.profiles import ProfileControls, ProfileDialog
@@ -40,11 +40,12 @@ from app.services.stores import StoreDirectory
 from app.services.network_diagnosis import FAMILY_LABELS
 from app.services.network_state import network_summary
 from app.utils.qt import single_shot
+from app.platforms.accessibility import prepare_accessibility
 
 
 class MainWindow(QMainWindow, BrowserControls, ProfileControls):
     def __init__(self,root:Path):
-        super().__init__();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
+        super().__init__();prepare_accessibility();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
         self.worker=None;self.closing=False;self.catalog_cache=CatalogCache(root);self.catalog=self.catalog_cache.load();self.store_results=[];self.run_events=[]
         self.embedded_browser=None;self.pending_browser_action=None
         self.store_directory=StoreDirectory()
@@ -144,8 +145,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.label(c,'备用付款方式','eyebrow');c.addWidget(self.payment_choices.backups)
         self.label(c,'勾选需要的备用方式，可拖动排序。官网会重新确认可用方式与期数。','muted');row.addWidget(frame,1)
         frame,c=self.card();c.addLayout(section_header('填写与下单'));c.addWidget(divider())
-        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写安全存储中的取货人信息');c.addWidget(self.transmit)
-        self.label(c,'向 Apple 中国大陆官网填写已保存的姓名、联系方式和证件字段。','muted');c.addWidget(divider())
+        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写本次输入的取货人信息');c.addWidget(self.transmit)
+        self.label(c,'向 Apple 中国大陆官网填写本次输入的姓名、联系方式和证件后四位。','muted');c.addWidget(divider())
         self.auto=QCheckBox('条件满足后自动提交订单');self.auto.setAccessibleName('允许在预设条件满足时自动提交真实订单');c.addWidget(self.auto)
         self.label(c,'仅用于真实购买。商品、数量、金额、门店和付款方案须通过最终核对；付款由你完成。','muted');c.addStretch()
         self.label(c,'自动提交目前只支持招商银行 24 期；官网缺少最终门店信息时，仍会请你核对。','muted')
@@ -673,7 +674,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         return QDateTime(QDate(value.year,value.month,value.day),QTime(value.hour,value.minute,value.second),QTimeZone.utc())
 
     def preparation_for(self,config,mode=Mode.LIVE):
-        items=preparation_items(config,mode=mode,profile_ids=[p['id'] for p in self.repo.profiles()],browser_installed=self.browser_installed,
+        items=preparation_items(config,mode=mode,profile_ids=[config.profile_id] if IdentityVault.cached(config.profile_id) is not None else (),browser_installed=self.browser_installed,
             session_open=bool(self.worker and self.worker.isRunning() and self.worker.session_open),login=self.login_observation,submission=self.repo.submission(config.intent_id))
         missing=self.product_choices.missing_choices()
         if missing:items[0]=PreparationItem('product','商品与配置','missing','请选择：'+'、'.join(missing),0,'设置商品')

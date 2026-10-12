@@ -146,6 +146,33 @@ async def test_saved_account_logs_in_once_and_remembers_only_when_selected(brows
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('delayed', [False, True])
+async def test_observed_idms_arrow_with_changed_or_delayed_label_submits_once(browser, delayed):
+    body=ONE_STEP.replace('<button ', '<button id="sign-in" aria-label="登录 Apple Store" '+('hidden ' if delayed else ''))
+    if delayed:
+        body+='''<script>document.querySelector('#password').addEventListener('input',()=>
+            setTimeout(()=>document.querySelector('#sign-in').hidden=false,200));</script>'''
+    f=await fixture(browser, body=body, auth_host='idmsa.apple.com.cn')
+    try:
+        assert await f.adapter.auto_sign_in(f.page)
+        assert len(f.submissions)==1 and len(f.reads)==1
+        assert await f.adapter.confirm_login(timeout=.2)
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+async def test_two_visible_idms_arrows_still_pause_without_submitting(browser):
+    body=ONE_STEP.replace('<button ', '<button id="sign-in" aria-label="登录 Apple Store" ')
+    body+='<button id="sign-in" aria-label="登录 Apple Store">另一登录按钮</button>'
+    f=await fixture(browser, body=body)
+    try:
+        with pytest.raises(UserAction,match='无法唯一确认'):
+            await f.adapter.auto_sign_in(f.page)
+        assert not f.submissions and len(f.reads)==1
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_cn_auth_503_is_reported_as_service_failure_without_a_second_password_submission(browser):
     f=await fixture(browser,auth_host='idmsa.apple.com.cn',auth_status=503,
         outcome='<p>无法验证你的身份。重试。</p>')

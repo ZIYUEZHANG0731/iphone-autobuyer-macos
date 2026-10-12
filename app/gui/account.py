@@ -1,13 +1,13 @@
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout,
-                               QLabel, QLineEdit, QMessageBox, QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+                               QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout)
 
 from app.models.config import ConfigError
 from app.models.credential import AppleCredential
-from app.platforms import vault_label
+from app.services.private_text import read_private_text
 
 
 class AccountDialog(QDialog):
-    def __init__(self, parent=None, *, credential=None, auto_login=True, trust_browser=True, persist=False):
+    def __init__(self, parent=None, *, credential=None, auto_login=True, trust_browser=True):
         super().__init__(parent)
         self.previous = credential
         self.setWindowTitle('Apple 账户')
@@ -15,7 +15,7 @@ class AccountDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(14)
-        note = QLabel('直接输入账号密码即可使用，无需另外设置授权密码。\n默认仅本次打开软件有效。')
+        note = QLabel('直接输入账号密码即可使用，无需另外设置授权密码。\n仅本次打开软件有效，不读写钥匙串。')
         note.setWordWrap(True)
         note.setObjectName('muted')
         layout.addWidget(note)
@@ -27,10 +27,13 @@ class AccountDialog(QDialog):
         self.password = QLineEdit()
         self.password.setAccessibleName('Apple 账户密码')
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password.setPlaceholderText('留空保留已存密码' if credential else '输入密码')
+        self.password.setPlaceholderText('留空保留本次密码' if credential else '输入密码')
         form.addRow('Apple 账户', self.account)
         form.addRow('密码', self.password)
         layout.addLayout(form)
+        self.import_button = QPushButton('从 TXT 导入账号密码…')
+        self.import_button.clicked.connect(self.import_text)
+        layout.addWidget(self.import_button)
         self.auto_login = QCheckBox('允许在官网要求登录时自动使用此账户')
         self.auto_login.setChecked(auto_login)
         self.trust_browser = QCheckBox('完成验证后，自动选择“信任此浏览器”')
@@ -39,9 +42,6 @@ class AccountDialog(QDialog):
         self.auto_login.toggled.connect(self.trust_browser.setEnabled)
         layout.addWidget(self.auto_login)
         layout.addWidget(self.trust_browser)
-        self.persist = QCheckBox(f'重启后保留（保存到{vault_label()}）')
-        self.persist.setChecked(persist)
-        layout.addWidget(self.persist)
         help_text = QLabel('请提前在同一浏览器完成首次验证。Apple 仍可能再次要求验证码；\n软件会保留当前页面并提醒你，不会反复提交密码。')
         help_text.setWordWrap(True)
         help_text.setObjectName('muted')
@@ -52,6 +52,21 @@ class AccountDialog(QDialog):
         buttons.accepted.connect(self.accept_checked)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def import_text(self):
+        path, _ = QFileDialog.getOpenFileName(self, '选择本机账号 TXT', '', '文本文件 (*.txt)')
+        if not path:
+            return
+        try:
+            fields = read_private_text(path)
+            if 'account' not in fields or 'password' not in fields:
+                raise ConfigError('TXT 需包含两行：账号=你的账号、密码=你的密码')
+            credential = AppleCredential(fields['account'], fields['password'])
+            credential.validate()
+            self.account.setText(credential.account)
+            self.password.setText(credential.password)
+        except ConfigError as exc:
+            QMessageBox.information(self, 'TXT 导入', str(exc))
 
     def credential(self):
         account = self.account.text().strip()

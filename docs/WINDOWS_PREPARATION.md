@@ -1,6 +1,8 @@
-# Windows 迁移准备（v0.7.0）
+# Windows 迁移准备（v0.7.3）
 
 本轮整理系统依赖和重复流程，保留 macOS 已验证的登录语言、数据目录、凭据服务名称和订单锁。提供 Windows 启动、打包入口；尚未在 Windows 真机执行，不能当成完成了 Windows 移植。
+
+v0.7.3 的账号与取货资料默认直接输入，仅当前进程使用，购买流程不调用 Windows 凭据管理器。旧原生记录和引用保留用于回退。`app/platforms/accessibility.py` 中的表格归属修补仅在 macOS Cocoa / Qt 6.11.2 启用；Windows 打包不编译或携带该 dylib，也不需要 Xcode。
 
 ## 模块边界
 
@@ -42,7 +44,7 @@ python -m venv .venv
 
 预期产物为 `dist\iPhone AutoBuyer\iPhone AutoBuyer.exe`，分发时保留整个目录。Windows 二进制须在 Windows 上构建；macOS 的 `.app` 不能转换成 Windows 程序。[PyInstaller 文档](https://www.pyinstaller.org/en/stable/usage.html#supporting-multiple-operating-systems)
 
-Windows 默认数据目录为 `%LOCALAPPDATA%\Apple AutoBuyer`，浏览器缓存为 `%LOCALAPPDATA%\ms-playwright`。凭据使用 Windows 凭据管理器，禁止明文后端。新增 Windows 时区数据依赖，预约仍统一为北京时间。POSIX 的 700/600 在 Windows 不等价于访问控制列表，发布验收必须核对当前用户目录的实际权限。
+Windows 默认数据目录为 `%LOCALAPPDATA%\Apple AutoBuyer`，浏览器缓存为 `%LOCALAPPDATA%\ms-playwright`。旧原生后端使用 Windows 凭据管理器，禁止明文后端；当前账号和取货资料直接输入后仅在内存使用。新增 Windows 时区数据依赖，预约仍统一为北京时间。POSIX 的 700/600 在 Windows 不等价于访问控制列表，发布验收必须核对当前用户目录的实际权限。
 
 ## 真机验收仍需完成
 

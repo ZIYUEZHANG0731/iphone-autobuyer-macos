@@ -119,7 +119,7 @@ class CredentialVault(SecureVault):
 
 
 def settings_for_disk(config):
-    """Session credentials never leave a dangling reference in settings/export."""
+    """Session-only inputs never leave dangling references in settings/export."""
     raw = config.to_dict()
     key = (CredentialVault.service, config.credential_id)
     with CredentialVault._lock:
@@ -128,4 +128,9 @@ def settings_for_disk(config):
             raw.update(credential_id=saved.get('credential_id', ''),
                        auto_login=saved.get('auto_login', False),
                        trust_browser=saved.get('trust_browser', False))
+        identity_key = (IdentityVault.service, config.profile_id)
+        if identity_key in IdentityVault._temporary:
+            saved = IdentityVault._fallback.get(identity_key, {})
+            raw.update(profile_id=saved.get('profile_id', ''),
+                       transmit_identity=saved.get('transmit_identity', False))
     return raw

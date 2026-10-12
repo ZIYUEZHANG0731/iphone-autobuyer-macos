@@ -37,7 +37,7 @@ def test_direct_account_entry_defaults_to_session_memory_and_auto_login(qt):
     dialog=AccountDialog()
     try:
         assert dialog.auto_login.isChecked() and dialog.trust_browser.isEnabled()
-        assert dialog.trust_browser.isChecked() and not dialog.persist.isChecked()
+        assert dialog.trust_browser.isChecked() and not hasattr(dialog,'persist')
         dialog.auto_login.click()
         assert not dialog.trust_browser.isEnabled()
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
@@ -55,31 +55,36 @@ def test_daily_chrome_button_selects_connection_and_checks_login(qt,tmp_path,mon
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
-def test_gui_saves_credentials_to_vault_and_only_reference_to_sqlite(qt,tmp_path,monkeypatch):
-    import app.gui.browser_controls as module
-    stored={}
-    vault=SimpleNamespace(put=lambda key,credential:stored.update({key:credential}),
-                          cached=lambda key:stored.get(key),is_temporary=lambda key:False,
-                          delete=lambda key:stored.pop(key))
-    monkeypatch.setattr(module,'CredentialVault',lambda:vault)
+def test_replacing_a_legacy_account_keeps_the_native_record_without_reading_or_deleting_it(qt,tmp_path,monkeypatch):
+    from uuid import uuid4
+    from app.security.vault import CredentialVault
+    import app.security.vault as vaults
+    monkeypatch.setattr(vaults,'credential_backend',lambda:pytest.fail('Direct input must not access native storage'))
     def accept(dialog):
         dialog.account.setText('fixture@example.invalid');dialog.password.setText('Test-Only-Secret')
-        dialog.auto_login.setChecked(True);dialog.trust_browser.setChecked(True);dialog.persist.setChecked(True)
+        dialog.auto_login.setChecked(True);dialog.trust_browser.setChecked(True)
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(AccountDialog,'exec',accept)
     window=MainWindow(tmp_path)
+    references=[]
     try:
-        assert not stored
+        legacy=str(uuid4());window.config.credential_id=legacy;window.config.auto_login=True
+        window.repo.save_config(window.config)
         window.configure_account()
-        assert len(stored)==1 and window.config.auto_login and window.config.trust_browser
-        config=window.repo.load_config();assert config.credential_id in stored
+        references.append(window.config.credential_id)
+        assert CredentialVault.cached(references[-1]).password=='Test-Only-Secret'
+        assert window.config.auto_login and window.config.trust_browser
+        config=window.repo.load_config();assert config.credential_id==legacy
         with window.repo.connect() as db:raw=db.execute('SELECT data FROM config').fetchone()[0]
         assert 'fixture@example.invalid' not in raw and 'Test-Only-Secret' not in raw
         assert '自动登录已开启' in window.account_status.text()
         assert 'Test-Only-Secret' not in window.redactor.clean('Test-Only-Secret')
-        first=window.config.credential_id;window.configure_account()
-        assert window.config.credential_id!=first and first not in stored and len(stored)==1
-    finally:window.shutdown();window.close();window.deleteLater();qt.processEvents()
+        first=window.config.credential_id;window.configure_account();references.append(window.config.credential_id)
+        assert window.config.credential_id!=first and CredentialVault.cached(first) is None
+        assert window.repo.load_config().credential_id==legacy
+    finally:
+        for reference in references:CredentialVault.forget(reference)
+        window.shutdown();window.close();window.deleteLater();qt.processEvents()
 
 
 def test_direct_account_entry_never_reads_native_storage_and_session_reference_is_not_saved(qt,tmp_path,monkeypatch):
@@ -102,7 +107,7 @@ def test_direct_account_entry_never_reads_native_storage_and_session_reference_i
         assert not stored.credential_id and not stored.auto_login and not stored.trust_browser
         with window.repo.connect() as db:raw=db.execute('SELECT data FROM config').fetchone()[0]
         assert reference not in raw and 'Session-Only-Test-Secret' not in raw and 'session@example.invalid' not in raw
-        assert '无需安全存储密码' in window.account_status.text()
+        assert '不读写钥匙串' in window.account_status.text()
     finally:
         if reference:CredentialVault.forget(reference)
         window.shutdown();window.close();window.deleteLater();qt.processEvents()

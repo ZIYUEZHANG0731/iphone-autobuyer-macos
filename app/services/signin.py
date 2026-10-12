@@ -62,6 +62,26 @@ async def sign_in_form(page):
     return forms[0] if forms else None
 
 
+async def sign_in_button(frame):
+    # The observed IDMS arrow is #sign-in. Its accessible label can include
+    # loading/help text, or become visible just after the password is filled.
+    # Restrict the fallback to a real button in the already-validated auth frame.
+    known = frame.locator('button#sign-in, #sign-in[role="button"], '
+                          'input#sign-in[type="submit"], input#sign-in[type="button"]').filter(visible=True)
+    count = await known.count()
+    if count:
+        return known if count == 1 else None
+    named = frame.get_by_role('button', name=NEXT_LABEL).filter(visible=True)
+    count = await named.count()
+    if count:
+        return named if count == 1 else None
+    try:
+        await known.wait_for(state='visible', timeout=5000)
+    except PlaywrightError:
+        return None
+    return known if await known.count() == 1 else None
+
+
 class SignInController:
     def __init__(self):
         self.attempted = set()
@@ -167,7 +187,7 @@ class SignInController:
             credential = provider(config.credential_id)
             credential.validate()
             self.attempted.add(config.credential_id)
-            progress('auto_login', {'status': 'started', 'message': '官网明确要求登录，正在使用本机钥匙串账户尝试一次'})
+            progress('auto_login', {'status': 'started', 'message': '官网明确要求登录，正在使用本次已填写的账号密码尝试一次'})
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             await guard()
@@ -196,8 +216,8 @@ class SignInController:
                     remember = frame.get_by_role('checkbox', name=re.compile(r'^(记住我|记住我的账户|Remember me|Remember my Apple Account)$', re.I)).filter(visible=True)
                     if config.trust_browser and await remember.count() == 1:
                         await remember.check(timeout=5000)
-                    button = frame.get_by_role('button', name=NEXT_LABEL).filter(visible=True)
-                    if await button.count() != 1:
+                    button = await sign_in_button(frame)
+                    if button is None:
                         raise UserAction('官网登录按钮无法唯一确认，请手动继续')
                     await guard()
                     password_submitted = True
@@ -207,8 +227,8 @@ class SignInController:
                     await account.fill(credential.account, timeout=5000)
                     if (await account.input_value()).casefold() != credential.account.casefold():
                         raise UserAction('官网未接受保存的账户，请手动确认')
-                    button = frame.get_by_role('button', name=NEXT_LABEL).filter(visible=True)
-                    if await button.count() != 1:
+                    button = await sign_in_button(frame)
+                    if button is None:
                         raise UserAction('官网账户继续按钮无法唯一确认，请手动继续')
                     account_entered = frame
                     account_submitted = True

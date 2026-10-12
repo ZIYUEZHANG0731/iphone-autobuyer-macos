@@ -206,7 +206,9 @@ class Worker(QThread):
         if hasattr(session,'ensure_page'):
             await session.ensure_page()
         def read_credential(credential_id):
-            credential=CredentialVault().get(credential_id)
+            credential=CredentialVault.cached(credential_id)
+            if credential is None:
+                raise UserAction('请在软件里直接填写 Apple 账号密码，或导入本机 TXT；自动登录不读取钥匙串')
             if repo:repo.redactor.register(credential)
             return credential
         login_options=dict(login_config=self.config,credential_provider=read_credential,
@@ -215,8 +217,10 @@ class Worker(QThread):
         if self.action in ('website', 'live'):
             self.review_data = {}
             if self.config.profile_id and self.config.transmit_identity:
-                self.status('正在读取本机安全存储中的取货资料；若系统显示安全存储提示，请在系统窗口允许读取')
-            identity = IdentityVault().get(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
+                self.status('正在使用本次填写的取货资料，不读取钥匙串')
+            identity = IdentityVault.cached(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
+            if self.config.profile_id and self.config.transmit_identity and identity is None:
+                raise UserAction('请在“取货人”直接填写姓名、证件后四位、手机号和邮箱，或导入本机 TXT；不会读取旧钥匙串资料')
             if identity:
                 repo.redactor.register(identity)
         adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)

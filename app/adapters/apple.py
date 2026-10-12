@@ -752,7 +752,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
                 await self.check_customer_verification()
                 return
             if identity is None or not config.transmit_identity:
-                raise UserAction("已到官网取货人表单：需填写真实姓名、联系方式、证件后四位并完成手机验证；请在 GUI 的 Keychain 取货人中设置并授权填写，或在浏览器手动填写后继续")
+                raise UserAction("已到官网取货人表单：请在软件的“取货人”直接填写姓名、证件后四位、手机号和邮箱，或导入本机 TXT；也可在官网手动填写并完成手机验证后继续")
             identity.validate()
             surname=getattr(identity,'family_name','')
             given=getattr(identity,'given_name','')
