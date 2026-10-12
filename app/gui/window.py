@@ -36,6 +36,7 @@ from app.gui.widgets import outline_icon,divider,section_header
 from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_VERSION, PRIVACY_POLICY_URL
 from app.services.stores import StoreDirectory
 from app.services.network_diagnosis import FAMILY_LABELS
+from app.services.network_state import network_summary
 from app.services.daily_chrome import EXTENSION_URL
 from app.utils.qt import single_shot
 
@@ -100,7 +101,7 @@ class MainWindow(QMainWindow):
                 if i==4:side.addSpacing(16)
                 self.label(side,'购买设置' if i==0 else '运行','sectionTitle')
             b=QPushButton(title);b.setObjectName('nav');b.setIcon(outline_icon(['box','store','person','card','sliders','document','browser'][i]));b.setIconSize(QSize(18,18));b.setCheckable(True);b.setAutoExclusive(True);b.toggled.connect(lambda checked,index=i:self.stack.setCurrentIndex(index) if checked else None);side.addWidget(b);self.nav.append(b)
-        side.addStretch();self.label(side,'v0.6.0','muted')
+        side.addStretch();self.label(side,'v0.6.3','muted')
         outer.addWidget(sidebar);outer.addWidget(self.stack,1)
         self.build_product();self.build_stores();self.build_profiles();self.build_payments();self.build_console();self.build_logs();self.build_browser()
         self.stack.currentChanged.connect(self.page_changed);self.nav[4].setChecked(True);self.stack.setCurrentIndex(4)
@@ -332,13 +333,15 @@ class MainWindow(QMainWindow):
         self.account_button=self.button(account_row,'保存 Apple 账户…',self.configure_account)
         self.remove_account_button=self.button(account_row,'删除保存账号',self.remove_account)
         self.browser_layout.addLayout(account_row)
-        row=QHBoxLayout();self.button(row,'内嵌登录 Apple 账户',self.login_embedded,'primary');self.button(row,'已完成登录，检查',self.complete_browser_login)
+        row=QHBoxLayout();self.button(row,'内置浏览器登录',self.login_embedded,'primary');self.button(row,'独立 Chrome 登录',self.login_chrome);row.addStretch();self.browser_layout.addLayout(row)
+        row=QHBoxLayout();self.button(row,'已完成登录，检查',self.complete_browser_login)
         self.button(row,'检查登录状态',lambda:self.launch('login_check'));self.button(row,'记录登录问题',lambda:self.launch('login_diagnosis'));row.addStretch();self.browser_layout.addLayout(row)
         row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome,'primary');self.button(row,'安装 Chrome 连接扩展…',self.open_chrome_extension);row.addStretch();self.browser_layout.addLayout(row)
         self.label(self.browser_layout,'日常 Chrome：先在官网正常登录，再通过 Microsoft 官方 Playwright 扩展选择一个 Apple 中国商店页面。关闭软件会话会断开连接，Chrome 和原有登录继续保留。','muted')
         self.browser_session_note=self.label(self.browser_layout,'登录诊断会随实际运行的浏览器记录；切换浏览器需要先关闭当前会话。','muted')
+        self.network_note=self.label(self.browser_layout,'登录期间自动记录本机网络变化；已有会话与验证码在同一浏览器保留。','muted')
         self.browser_holder=QWidget();self.browser_holder_layout=QVBoxLayout(self.browser_holder);self.browser_holder_layout.setContentsMargins(0,0,0,0)
-        self.browser_placeholder=self.label(self.browser_holder_layout,'点击“内嵌登录 Apple 账户”打开官网。登录完成后可回控制台设置开售时间。','muted');self.browser_holder_layout.addStretch();self.browser_layout.addWidget(self.browser_holder,1)
+        self.browser_placeholder=self.label(self.browser_holder_layout,'选择内置浏览器或独立 Chrome 登录。完成后可回控制台设置开售时间。','muted');self.browser_holder_layout.addStretch();self.browser_layout.addWidget(self.browser_holder,1)
         self.stack.addWidget(page)
 
     def update_account_status(self):
@@ -380,13 +383,20 @@ class MainWindow(QMainWindow):
         except FlowError as exc:QMessageBox.information(self,'Apple 账户',str(exc));self.update_account_status()
 
     def login_embedded(self):
+        self.login_browser('embedded')
+
+    def login_chrome(self):
+        self.login_browser('chrome')
+
+    def login_browser(self,kind):
         if self.worker and self.worker.isRunning():
             if not self.worker.idle:
-                self.message_label.setText('先停止当前任务，再切换内置浏览器。');return
-            if self.worker.embedded:
+                self.message_label.setText('先停止当前任务，再切换登录浏览器。');return
+            current=getattr(self.worker,'session_kind','embedded' if self.worker.embedded else 'chrome')
+            if current==kind:
                 self.launch('login');return
-            self.pending_browser_action='login';self.browser_kind.setCurrentIndex(self.browser_kind.findData('embedded'));self.close_session();return
-        self.browser_kind.setCurrentIndex(self.browser_kind.findData('embedded'));self.launch('login')
+            self.pending_browser_action='login';self.browser_kind.setCurrentIndex(self.browser_kind.findData(kind));self.close_session();return
+        self.browser_kind.setCurrentIndex(self.browser_kind.findData(kind));self.launch('login')
 
     def connect_daily_chrome(self):
         if self.worker and self.worker.isRunning():
@@ -408,8 +418,18 @@ class MainWindow(QMainWindow):
         self.message_label.setText('请在日常 Chrome 审阅并安装 Microsoft 官方 Playwright Extension，再点“接入日常 Chrome”。' if started else '未能打开 Chrome，请手动在 Chrome Web Store 搜索 Playwright Extension（Microsoft）。')
 
     def complete_browser_login(self):
-        if self.worker and self.worker.isRunning() and not self.worker.idle:self.resume()
-        else:self.launch('login_check')
+        self.launch('login_check')
+
+    def show_active_browser(self,kind):
+        if self.embedded_browser is not None:
+            self.embedded_browser.setVisible(kind=='embedded')
+        if kind=='embedded':
+            self.browser_placeholder.hide()
+        else:
+            if self.browser_holder_layout.indexOf(self.browser_placeholder)<0:
+                self.browser_holder_layout.addWidget(self.browser_placeholder)
+            self.browser_placeholder.setText('当前使用日常 Chrome。登录与购买都在已连接的 Apple 页面进行。' if kind=='daily_chrome' else '当前使用软件独立 Chrome。登录与购买都在该 Chrome 窗口进行，可从控制台点击“打开浏览器”。')
+            self.browser_placeholder.show()
 
     def ensure_embedded(self):
         if self.embedded_browser is None:
@@ -418,6 +438,7 @@ class MainWindow(QMainWindow):
             self.browser_placeholder.hide();self.browser_holder_layout.removeWidget(self.browser_placeholder)
             while self.browser_holder_layout.count():self.browser_holder_layout.takeAt(0)
             self.browser_holder_layout.addWidget(self.embedded_browser,1)
+        self.show_active_browser('embedded')
         return {'endpoint':self.embedded_browser.endpoint,'primary_id':self.embedded_browser.primary_id,'bridge':self.embedded_browser.bridge}
 
     def populate(self):
@@ -609,6 +630,13 @@ class MainWindow(QMainWindow):
     def launch(self,action):
         running=self.worker and self.worker.isRunning()
         if running and not self.worker.idle:
+            if action=='login_check' and getattr(self.worker,'action',None) in ('login','login_diagnosis') and self.last_state=='PAUSED' and not self.worker.control.cancel_event.is_set() and not self.worker.control.stop_event.is_set():
+                if time.monotonic()<self.cooldown_until:
+                    self.message_label.setText(f'官网访问限制仍需等待 {math.ceil(self.cooldown_until-time.monotonic())} 秒，再检查；现有会话保留。')
+                    return
+                self.resume()
+                self.message_label.setText('正在核验当前浏览器的登录结果…')
+                return
             self.message_label.setText('已有浏览器任务在运行，请先停止或继续当前任务。');return
         if action not in ('environment','receipt','local','install') and time.monotonic()<self.cooldown_until:
             self.message_label.setText(f'官网访问限制仍需等待 {math.ceil(self.cooldown_until-time.monotonic())} 秒，再检查；现有会话保留。');return
@@ -691,6 +719,7 @@ class MainWindow(QMainWindow):
             self.browser_session_note.setText('当前运行与诊断：'+data['name'])
             if data.get('kind') in ('embedded','chrome','daily_chrome'):
                 self.browser_kind.setCurrentIndex(self.browser_kind.findData(data['kind']))
+                self.show_active_browser(data['kind'])
         elif kind=='price_confirmation':self.show_price_choice(data)
         elif kind=='price_confirmed':self.console_log.appendPlainText(f'已接受本次官网价格：RMB {float(data["amount"]):,.2f}')
         elif kind=='consent_required':self.show_consent_help(data)
@@ -708,6 +737,10 @@ class MainWindow(QMainWindow):
             if data.get('error_class')=='apple_not_found_html':details+='（Apple 错误页）'
             if data.get('service_error_codes'):details+=' · Apple 错误码 '+', '.join(data['service_error_codes'])
             self.console_log.appendPlainText('登录诊断 · '+FAMILY_LABELS.get(data['family'],'官网请求')+' · '+data['host']+' · '+data.get('method','')+' → '+details)
+        elif kind=='network_state':
+            self.network_note.setText(network_summary(data))
+            if data.get('changed'):
+                self.console_log.appendPlainText('检测到本机网络设置变化；登录页与现有会话保留。请在同一官网登录页验证连接结果。')
         elif kind=='checkout_auth':self.console_log.appendPlainText(data['message'])
         elif kind=='verification_required':
             self.message_label.setText(data['message']);self.tray.showMessage('需要 Apple 账户验证' if data.get('kind')=='apple_account' else '需要手机验证',data['message'],QSystemTrayIcon.MessageIcon.Information,10000)
@@ -715,7 +748,7 @@ class MainWindow(QMainWindow):
             self.console_log.appendPlainText('已从官网目录找到 '+data['name']+' 的购买入口')
             if normalize_name(self.name.currentText())==normalize_name(data['name']):self.url.setText(data['url'])
         elif kind=='login':
-            self.login_observation=dict(data);self.login_label.setText(('登录已确认 · '+data['checked_at'][:19].replace('T',' ')+' UTC') if data.get('authenticated') else ('登录状态：'+data.get('reason','暂时无法复核')))
+            self.login_observation=dict(data);self.login_label.setText(('登录已确认 · 北京时间 '+self.local_timestamp(data['checked_at'])) if data.get('authenticated') else ('登录状态：'+data.get('reason','暂时无法复核')))
         elif kind=='preorder_preparation':self.console_log.appendPlainText('官网提前准备入口：'+('、'.join(data['visible_entries']) if data['visible_entries'] else '当前商品页未显示；按开售时间等待购买流程开放'))
         elif kind=='session':
             self.browser_kind.setEnabled(True)

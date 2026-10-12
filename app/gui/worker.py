@@ -30,7 +30,7 @@ from app.utils.power import KeepAwake
 from app.services.catalog_reader import read_catalog
 from app.services.traffic import SiteCooldown
 from app.services.signin import SignInController
-from app.services.login import account_page_url, apple_auth_url, shop_signin_url
+from app.services.login import apple_auth_url, shop_signin_url, session_page_url
 from app.services.network_diagnosis import NetworkDiagnosis
 
 
@@ -238,8 +238,10 @@ class Worker(QThread):
                 pending=self.sign_in.pending_page
                 if pending and not pending.is_closed():
                     session.page=pending;adapter.bind_page(pending)
-                elif not (diagnostic and (account_page_url(session.page.url) or apple_auth_url(session.page.url)
-                                          or shop_signin_url(session.page.url))):
+                elif session_page_url(session.page.url) and await adapter.check_login(auto_recover=False) is True:
+                    self.sign_in.authenticated(self.config.credential_id)
+                    return {'state':'COMPLETED','message':'原有登录仍有效。继续使用同一浏览器会话，无需重新登录'}
+                elif not (apple_auth_url(session.page.url) or shop_signin_url(session.page.url)):
                     self.status('正在从商店购物袋打开官网登录入口…')
                     await adapter.open_store_signin(session.page)
                 if await adapter.login_status(timeout=1) is True:

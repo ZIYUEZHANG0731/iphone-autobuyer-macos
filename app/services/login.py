@@ -10,6 +10,7 @@ AUTH_HOSTS = frozenset(('idmsa.apple.com', 'idmsa.apple.com.cn', 'appleid.apple.
 ACCOUNT_ENTRY = 'https://www.apple.com.cn/shop/browse/account/home'
 STORE_ENTRY = 'https://www.apple.com.cn/store'
 LOGOUT_LABEL = re.compile(r'注销|退出登录')
+SIGNIN_LABEL = re.compile(r'^(登录|登入|Sign In|Log In)$', re.I)
 
 
 def shop_signin_url(url):
@@ -83,6 +84,34 @@ async def show_store_bag(page, *, timeout=5000):
     return menu
 
 
+async def store_signin_link(page, menu):
+    """Select the official profile entry rather than the saved-items prompt.
+
+Apple renders two visible sign-in links in an empty bag. Its public globalnav
+component identifies the profile link separately. Different SSI contexts must
+not be merged just because their accessible labels match.
+"""
+    links = menu.get_by_role('link', name=SIGNIN_LABEL).filter(visible=True)
+    profile = links.and_(menu.locator(
+        '[data-ac-autom="gn-bagview-link-signIn"], a.ac-gn-bagview-nav-link-signin'))
+    profile_count = await profile.count()
+    if profile_count > 1:
+        raise UserAction('购物袋的个人资料登录入口不唯一，请在官网自行选择')
+    candidates = profile if profile_count == 1 else links
+    count = await candidates.count()
+    if not count:
+        return None
+    targets = []
+    for href in await candidates.evaluate_all('(links) => links.map(link => link.getAttribute("href"))'):
+        target = urljoin(page.url, href) if href else ''
+        if not shop_signin_url(target):
+            raise UserAction('购物袋登录链接无法确认；请在官网手动打开登录页')
+        targets.append(target)
+    if len(set(targets)) != 1:
+        raise UserAction('购物袋显示不同的登录入口，请在官网自行选择')
+    return candidates.first
+
+
 async def follow_store_account(page, menu=None):
     """Verify a remembered Store identity through its normal account link."""
     menu=menu if menu is not None else await show_store_bag(page)
@@ -96,7 +125,10 @@ async def follow_store_account(page, menu=None):
     href=await account.get_attribute('href')
     if not href or not account_page_url(urljoin(page.url,href)):
         raise UserAction('购物袋的账户入口无法确认，请在官网手动复核登录')
-    await account.click(timeout=5000)
+    # click() also waits for its navigation. A valid account response can arrive
+    # just after five seconds; allow the normal redirect to finish without a
+    # second click, reload or credential submission.
+    await account.click(timeout=15000)
     await page.wait_for_load_state('domcontentloaded',timeout=15000)
     return True
 

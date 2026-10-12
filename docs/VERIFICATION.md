@@ -4,6 +4,30 @@
 
 ## 环境与可运行产物
 
+### v0.6.3 慢账户跳转
+
+- build 23 实际更新后登录保留：账户文档 **17:45:32 UTC / GET 200**，再次普通账户复核 **17:47:15 UTC / GET 200**，软件在 **17:47:16 UTC** 显示“当前浏览器登录已确认”，时间展示为北京时间 10-13 01:47:16。没有重新提交密码。记录 `apple-login-v062-build23-restored-actual.json`，权限 0600、Git 忽略。
+- 首次复核在正常账户页晚到前暂停，新增 5.5 秒响应的完全离线夹具；旧代码 **1 failed / 6.20 秒**，明确为账户链接已点击后的五秒导航等待超时。记录 `slow-account-navigation-before-fix.txt`。调整为同一次点击允许 15 秒内完成；不自动重发点击或密码。
+- 调整后的登录相关源码检查 **50 passed / 18.78 秒**，覆盖新的慢响应、官网入口、受保护订单页面、认证状态恢复及登录界面。记录 `pytest-v063-build24-login-final.txt`、`tests-v063-build24-login-final.xml`。本轮完整回归的 338 项结果在 build 23 节，最终导航等待调整通过专项验收，没有将两组结果相加为一轮完整测试。
+- 已安装 **v0.6.3 / build 24**，构建、严格签名核验及打包 GUI / 内置 renderer 自检通过，分别输出 `GUI_SMOKE_OK` / `EMBEDDED_SMOKE_OK`，退出 0。记录 `build-v063-build24.log`、`packaged-v063-build24-gui-smoke.log`、`packaged-v063-build24-embedded-smoke.log`、`install-v063-build24.log`。空闲旧窗口正常 Cmd-Q 退出后安装，安装前后最新保存的配置完全一致。
+- 最终真实窗口点击“独立 Chrome 登录”，复用软件自己的 Chrome 资料：**17:53:43 UTC 账户 GET / 200**、**17:53:44 UTC 自动确认原登录仍有效**；界面显示北京时间 10-13 01:53:44，没有早暂停或新的密码提交，捕获错误数 0。Chrome 模式说明不会显示内置旧页面。记录 `apple-login-v063-build24-restored-actual.json`，权限 0600、Git 忽略；本次测试主动将模式从内置改为独立 Chrome，其他所有配置仍与安装前相同。当前软件会话保留，无新订单或付款。
+
+### v0.6.2 登录检查与浏览器页面同步
+
+- 用户实际在 build 22 软件独立 Chrome 完成登录后反馈检测错误。窗口中的“检查登录状态”因预登录任务仍等待而被拦截；通过“继续检查”在 **2026-10-12 17:34:29 UTC** 确认同一会话已登录。新版本统一预登录等待中的检查入口，不继续购买或协议暂停，不跳过官网等待；Chrome 活跃时隐藏旧内置失败页，保留原视图。确认时间显示北京时间。
+- 最终完整源码 **338 passed / 118.30 秒**，记录 `pytest-v062-build23-final.txt`、`tests-v062-build23-final.xml`。新增界面检查覆盖控制台/浏览器页的实际检查按钮、登录诊断完成按钮、两类购买暂停、官网等待期限、切换后旧内置视图隐藏但保留，以及 UTC 观察到北京时间展示的换算。官网真实认证与上述离线检查分开记录。
+- build 23 构建、严格签名核验及打包自检通过，`GUI_SMOKE_OK` / `EMBEDDED_SMOKE_OK`，退出码均为 0。记录 `build-v062-build23.log`、`packaged-v062-build23-gui-smoke.log`、`packaged-v062-build23-embedded-smoke.log`。已正常关闭旧软件会话并 Cmd-Q 退出，进程结束后安装 **v0.6.2 / build 23**；安装前后全部配置一致，当前模式为软件独立 Chrome。实际窗口确认原 Duo、六家门店、招商银行 24 期及北京时间。记录 `install-v062-build23.log`、私有 `build23-config-before-install.json`。
+
+### v0.6.1 独立浏览器登录入口与网络对照
+
+- build 22 首轮完整回归 **326 passed / 122.04 秒**。补充缓存账户页不能解除新认证失败的检查后，第二轮 **328 passed / 1 failed / 121.55 秒**：新增夹具使用了 Playwright `browser.new_page()` 所属的单页上下文，无法创建辅助复核页，改为 `new_context()` / `context.new_page()`；原失败保护已在该夹具前半段得到验证。记录 `pytest-v061-build22-initial.txt` 与 `pytest-v061-build22-fixture-failure.txt`。
+- 修正夹具后的完整回归 **329 passed / 118.03 秒**，记录 `pytest-v061-build22-final.txt`、`tests-v061-build22-final.xml`。随后本机查询发现 VPN 命令须用 `scutil --nc list`，该常量与专项夹具同步修正；新增真实 macOS 只读查询检查后的网络专项 **8 passed / 1.21 秒**，记录 `pytest-v061-build22-network-final.txt`、`tests-v061-build22-network-final.xml`。这里分别报告完整与专项结果，不重复累计。
+- 正确系统命令重新查询：系统代理开关与代理环境变量均未配置、接口类型为一个物理接口、IPv4 可用、IPv6 未报告、标准 VPN 连接数 0，所有查询成功。旧现场脚本的 VPN 数量因错误命令已作废。Chrome 软件资料与日常 Default/Profile 1 的白名单设置对照，均未发现显式代理服务器/PAC 或专用 Secure DNS 模板；这不能排除网络扩展及服务器对不同会话的判断。
+- 构建与严格签名核验通过；打包 GUI 和内置 renderer 离线自检分别输出 `GUI_SMOKE_OK`、`EMBEDDED_SMOKE_OK`，均退出 0。记录 `build-v061-build22.log`、`packaged-v061-build22-gui-smoke.log`、`packaged-v061-build22-embedded-smoke.log`。截图只来自临时离线配置。
+- 已安装 **v0.6.1 / build 22**，安装前后全部配置一致。实际窗口已确认 Duo、六家上海自提店、招商银行 24 期及两个直接登录按钮。旧版会话正常关闭、Cmd-Q 退出，进程结束；新安装版实际验证单独记录，合成通过不等于 Apple 认证成功。记录 `install-v061-build22.log`、私有 `build22-config-before-install.json`。
+- 实际新版本内置入口自动选择正确个人资料登录链接；单次认证初始化 **17:32:11 UTC / 200 JSON**，提交 **17:32:15 UTC / 503 HTML**，界面仍无法验证身份。随后用户在软件独立 Chrome 登录：初始化 **17:32:46 UTC / 200 JSON**、提交 **17:32:56 UTC / 200 JSON / hsa2**、商店回调 **17:32:57 UTC / 200 JSON**、账户页 **17:32:58 UTC / 200 HTML**，代理继续检查确认成功。两种浏览器捕获错误数均为 0，记录 `apple-login-v061-build22-embedded-actual.json`、`apple-login-v061-build22-chrome-actual.json`，权限 0600、Git 忽略。不保存密码、不复制日常 Cookie、不创建订单。
+- 两场认证均为同一对端摘要、IPv4、TLS 1.3 / HTTP 1.1，网络样本相同；原生 Chrome 为 155，Qt 内置 Chromium 为 140。不能将此次成功解释为唯一根因已解决、强制更换对端或完全取消官网风控；也不把初始空白页 secure_context / WebCrypto 取值当成认证框架能力。
+
 ### v0.6.0 日常 Chrome 连接
 
 - build 20 完整源码 **298 passed / 109.74 秒**；构建、严格签名核验、打包 GUI 和内嵌 renderer 自检均通过。记录 `pytest-v060-build20-final.txt`、`tests-v060-build20-final.xml`、`build-v060-build20.log`、`packaged-v060-build20-smoke.log`、`install-v060-build20.log`。已实际安装，看到 v0.6.0、原 Duo、六家自提店和招商银行 24 期计划。安装脚本不改应用数据；用户操作期间浏览器模式发生变化，其他配置与此前快照一致，未覆盖用户的新选择。

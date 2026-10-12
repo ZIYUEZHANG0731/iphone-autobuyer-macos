@@ -21,7 +21,7 @@ coll=COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='iPhone AutoBuyer
 app=BUNDLE(coll,name='iPhone AutoBuyer.app',icon=str(root/'app/gui/icon.icns'),
     bundle_identifier='com.autobuyer.apple.desktop',info_plist={
     'CFBundleDisplayName':'iPhone AutoBuyer',
-    'CFBundleShortVersionString':'0.6.0','CFBundleVersion':'21',
+    'CFBundleShortVersionString':'0.6.3','CFBundleVersion':'24',
     'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'13.0',
     'NSHumanReadableCopyright':'Apple AutoBuyer — local purchasing preparation tool',
     })

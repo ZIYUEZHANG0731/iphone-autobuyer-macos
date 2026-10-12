@@ -71,7 +71,7 @@ async def test_passive_observer_keeps_541_callback_and_service_error_after_actio
                     <button onclick="fetch('https://idmsa.apple.com/appleauth/auth/signin/complete',{method:'POST',body:'PRIVATE_PASSWORD'})">认证提交</button>''')
 
         await context.route('**/*', route)
-        diagnosis = NetworkDiagnosis(tmp_path, 'chrome', progress=lambda k,v:seen.append(v))
+        diagnosis = NetworkDiagnosis(tmp_path, 'chrome', progress=lambda k,v:seen.append(v) if k=='network_diagnosis' else None)
         await diagnosis.start(context, page)
         try:
             await page.goto('https://secure7.www.apple.com.cn/shop/signIn/account')

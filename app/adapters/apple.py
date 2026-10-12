@@ -21,7 +21,8 @@ from app.services.catalog_reader import public_links
 from app.services.consent import matches_saved_notice, NOTICE_VERSION
 from app.services.login import (STORE_ENTRY, LOGOUT_LABEL, account_page_url,
     apple_auth_url, shop_signin_url, store_page_url, show_store_bag,
-    follow_store_account, visible_login_form, account_check_url, authenticated_account_page)
+    follow_store_account, store_signin_link, visible_login_form, account_check_url,
+    authenticated_account_page, session_page_url)
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
 from copy import deepcopy
@@ -98,7 +99,9 @@ class AppleAdapter:
         self.page.remove_listener('domcontentloaded',self._dom_loaded)
 
     def bind_page(self,page):
+        changed=page is not self.page
         self.detach();self.page=page;self.dom_ready=None;self.last_document_status=200
+        if changed:self.auth_service_status=None
         page.on('response',self._response);page.on('domcontentloaded',self._dom_loaded)
 
     def _response(self,response):
@@ -106,9 +109,19 @@ class AppleAdapter:
         if not apple_url(response.url) and not auth_response:
             return
         path=urlsplit(response.url).path
-        if (response.status < 400 and (auth_response or shop_signin_url(response.url))
-                and (response.request.resource_type=='document' or path.endswith('/signin/complete'))):
+        auth_completion = auth_response and (path.endswith('/signin/complete') or '/auth/verify' in path)
+        auth_restarted = response.request.resource_type=='document' and (
+            auth_response or shop_signin_url(response.url) or session_page_url(response.url))
+        if ((response.status < 400 and (auth_restarted or auth_completion))
+                or (auth_response and path.endswith('/signin/complete') and response.status==409)):
+            # Apple's normal 409 can advance to two-factor authentication.
+            # Clear a prior service failure; this alone never confirms login.
+            recovered=bool(getattr(self,'auth_service_status',None))
             self.auth_service_status=None
+            if recovered:
+                self.progress('login',{'authenticated':None,'status':'authentication_progress',
+                    'checked_at':datetime.now(timezone.utc).isoformat(),
+                    'reason':'当前认证流程已继续；请完成官网验证，再检查有效登录'})
         if response.request.resource_type=='document' and getattr(response.request,'frame',None) is getattr(self.page,'main_frame',None):
             self.dom_ready=False;self.navigation_started=asyncio.get_running_loop().time()
             self.response_episode=uuid4().hex
@@ -267,7 +280,6 @@ class AppleAdapter:
         except PlaywrightError:
             await self.guard(page)
             raise UserAction('商店购物袋菜单尚未载入；保留页面，请从购物袋的“登录”入口继续') from None
-        login=menu.get_by_role('link',name=re.compile(r'^(登录|登入|Sign In|Log In)$',re.I)).filter(visible=True)
         deadline=asyncio.get_running_loop().time()+8
         while True:
             await self.guard(page)
@@ -277,12 +289,8 @@ class AppleAdapter:
                 await follow_store_account(page,menu)
                 await self.login_guard(page)
                 return
-            count=await login.count()
-            if count>1:raise UserAction('购物袋显示多个登录入口，请在官网自行选择')
-            if count==1:
-                href=await login.get_attribute('href')
-                if not href or not shop_signin_url(urljoin(page.url,href)):
-                    raise UserAction('购物袋登录链接无法确认；请在官网手动打开登录页')
+            login=await store_signin_link(page,menu)
+            if login is not None:
                 # The website owns the destination, SSI and redirect context.
                 # Click the actual menu link; do not persist or replay its URL.
                 await login.click(timeout=5000)
@@ -388,7 +396,7 @@ class AppleAdapter:
         labels=await preparation.all_text_contents()
         self.progress('preorder_preparation',{'visible_entries':[s.strip() for s in labels if s.strip()]})
 
-    async def check_login(self):
+    async def check_login(self, *, auto_recover=True):
         # One normal account-page check before a real scheduled run. No cookie export.
         pending=self.sign_in.pending_page
         account=pending if pending and not pending.is_closed() else await self.new_page()
@@ -411,7 +419,7 @@ class AppleAdapter:
             if status is True:
                 if config:self.sign_in.authenticated(config.credential_id)
                 keep=False
-            elif status is False and config and config.auto_login:
+            elif status is False and auto_recover and config and config.auto_login:
                 try:
                     if not keep:await self.open_store_signin(account)
                     attempted=await self.auto_sign_in(account,config)

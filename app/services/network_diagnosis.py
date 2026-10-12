@@ -10,6 +10,8 @@ import asyncio
 from collections import deque
 from datetime import datetime, timezone
 import json
+import hashlib
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -17,6 +19,7 @@ from urllib.parse import urlsplit
 
 from app.models.config import apple_url
 from app.services.login import apple_auth_url
+from app.services.network_state import read_local_network
 
 
 FAMILY_LABELS = {
@@ -142,9 +145,10 @@ def response_shape(text: str, content_type: str) -> dict:
 
 
 class NetworkDiagnosis:
-    def __init__(self, root: Path, kind: str, *, progress=None):
+    def __init__(self, root: Path, kind: str, *, progress=None, network_reader=None):
         self.kind = kind if kind in ('embedded','daily_chrome') else 'chrome'
         self.path = Path(root) / f'login-diagnostic-{self.kind}.json'
+        self.previous_path = Path(root) / f'login-diagnostic-{self.kind}-previous.json'
         self.progress = progress or (lambda *_: None)
         self.context = None
         self.started = datetime.now(timezone.utc).isoformat()
@@ -157,8 +161,24 @@ class NetworkDiagnosis:
         self.sequence = 0
         self.sampler = None
         self.pages = set()
+        self.network_reader = network_reader or read_local_network
+        self.network_samples = deque(maxlen=32)
+        self.network_revision = 0
+        self.network_lock = asyncio.Lock()
+        self.network_checked_at = float('-inf')
+        self.network_pending = False
+        self.closed = False
 
     async def start(self, context, page):
+        # Retain the immediately preceding session so a later failed restart
+        # does not erase a successful VPN/login comparison. Only two files per
+        # browser kind are kept; no public upload or telemetry is involved.
+        try:
+            if self.path.is_file() and not self.path.is_symlink():
+                self.path.replace(self.previous_path)
+                self.previous_path.chmod(0o600)
+        except OSError:
+            pass
         self.context = context
         context.on('request', self.observe_request)
         context.on('response', self.observe_response)
@@ -168,17 +188,66 @@ class NetworkDiagnosis:
             self.observe_page(opened)
         # This reads browser capabilities only; no page fields or storage.
         try:
-            self.runtime = browser_capabilities(await page.evaluate('''() => ({
+            self.runtime = browser_capabilities(await asyncio.wait_for(page.evaluate('''() => ({
                 user_agent:navigator.userAgent, languages:Array.from(navigator.languages),
                 platform:navigator.platform, webdriver:navigator.webdriver,
                 cookies_enabled:navigator.cookieEnabled,
                 secure_context:isSecureContext, webcrypto:!!globalThis.crypto?.subtle
-            })'''))
+            })'''), 2))
             self.runtime['sampled_at'] = 'browser_start'
         except Exception:
             self.runtime = {'unavailable': True}
         self.save()
+        self.schedule_network('browser_start')
         self.sampler = asyncio.create_task(self.sample_loop())
+
+    def track_task(self, coroutine):
+        task = asyncio.create_task(coroutine)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    def schedule_network(self, reason, event=None):
+        if self.closed or len(self.tasks) >= 64:
+            return
+        if event is None:
+            if self.network_pending:
+                return
+            if reason != 'browser_start' and asyncio.get_running_loop().time()-self.network_checked_at < 5:
+                return
+            self.network_pending = True
+        self.track_task(self.sample_network(reason, event))
+
+    async def sample_network(self, reason, event=None):
+        try:
+            async with self.network_lock:
+                now = asyncio.get_running_loop().time()
+                if now-self.network_checked_at >= 1 or not self.network_samples:
+                    try:
+                        state = await asyncio.wait_for(self.network_reader(), 2)
+                    except (OSError, asyncio.TimeoutError):
+                        state = {'available': False}
+                    observed_at = datetime.now(timezone.utc).isoformat()
+                    self.network_checked_at = asyncio.get_running_loop().time()
+                    changed = not self.network_samples or self.network_samples[-1]['state'] != state
+                    if changed:
+                        self.network_revision += 1
+                        self.network_samples.append({'revision': self.network_revision,
+                            'first_seen': observed_at, 'last_seen': observed_at, 'reason': reason,
+                            'state': state})
+                        self.progress('network_state', {'changed': self.network_revision > 1, **state})
+                    else:
+                        self.network_samples[-1]['last_seen'] = observed_at
+                if event is not None and self.network_samples:
+                    event['network_revision'] = self.network_samples[-1]['revision']
+                    event['network_observed_at'] = self.network_samples[-1]['last_seen']
+                self.save()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.health['network_sample_errors'] = self.health.get('network_sample_errors', 0)+1
+        finally:
+            if event is None:
+                self.network_pending = False
 
     def observe_page(self, page):
         if page in self.pages:
@@ -206,12 +275,18 @@ class NetworkDiagnosis:
         if not family or request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
             return
         self.sequence += 1
-        self.append({'sequence': self.sequence, 'time': datetime.now(timezone.utc).isoformat(),
-                     'host': family[0], 'family': family[1], 'method': request.method, 'phase': 'request_started'})
+        event = {'sequence': self.sequence, 'time': datetime.now(timezone.utc).isoformat(),
+                 'host': family[0], 'family': family[1], 'method': request.method, 'phase': 'request_started'}
+        self.append(event)
+        if family[1] in ('auth_init', 'auth_complete', 'auth_signin', 'auth_verify', 'shop_idms'):
+            self.schedule_network('auth_request', event)
 
     async def sample_loop(self):
         while True:
             await self.sample_pages()
+            if any(sample['family'] in ('shop_signin', 'auth_init', 'auth_complete', 'auth_other')
+                   for sample in self.page_samples):
+                self.schedule_network('login_visible')
             await asyncio.sleep(2)
 
     async def sample_pages(self):
@@ -253,9 +328,41 @@ class NetworkDiagnosis:
                 and response.request.method in ('GET', 'HEAD')):
             return
         self.sequence += 1
-        task = asyncio.create_task(self.capture_response(response, family, self.sequence))
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        if len(self.tasks) < 64:
+            self.track_task(self.capture_response_bounded(response, family, self.sequence))
+        else:
+            self.health['dropped_response_events'] = self.health.get('dropped_response_events', 0)+1
+
+    async def capture_response_bounded(self, response, family, sequence):
+        try:
+            await asyncio.wait_for(self.capture_response(response, family, sequence), 6)
+        except asyncio.TimeoutError:
+            self.health['capture_errors'] += 1
+            self.health['last_capture_error'] = 'TimeoutError'
+            self.save()
+
+    async def transport_metadata(self, response):
+        result = {}
+        async def read(method):
+            try:
+                return await asyncio.wait_for(getattr(response, method)(), 1)
+            except Exception:
+                return None
+        peer, security, http = await asyncio.gather(
+            read('server_addr'), read('security_details'), read('http_version'))
+        if isinstance(peer, dict):
+            try:
+                address = ipaddress.ip_address(peer.get('ipAddress', ''))
+                result['peer_ip_version'] = address.version
+                result['peer_scope'] = 'public' if address.is_global else 'local'
+                result['peer_fingerprint'] = hashlib.sha256(str(address).encode()).hexdigest()[:16]
+            except ValueError:
+                pass
+        if isinstance(security, dict) and security.get('protocol') in ('TLS 1.2', 'TLS 1.3'):
+            result['tls_protocol'] = security['protocol']
+        if http in ('HTTP/1.0', 'HTTP/1.1', 'HTTP/2', 'HTTP/3', 'h2', 'h3'):
+            result['http_version'] = http
+        return result or {'available': False}
 
     async def capture_response(self, response, family, sequence):
         try:
@@ -268,6 +375,10 @@ class NetworkDiagnosis:
             event = {'sequence': sequence, 'time': datetime.now(timezone.utc).isoformat(), 'host': family[0],
                      'family': family[1], 'method': method, 'resource_type': resource,
                      'status': response.status, 'content_type': content_type}
+            auth_event = family[1] in ('auth_init', 'auth_complete', 'auth_signin', 'auth_verify', 'shop_idms')
+            if auth_event or response.status in (403, 429, 503, 541):
+                self.schedule_network('auth_response' if auth_event else 'request_failure', event)
+                event['transport'] = await self.transport_metadata(response)
             # Status alone misses Apple's JSON service error behind HTTP 200.
             inspect = response.status >= 400 or (family[1].startswith('auth_') and content_type == 'application/json')
             if inspect and content_type in ('application/json', 'text/html'):
@@ -298,6 +409,8 @@ class NetworkDiagnosis:
                  'family': family[1], 'network_error': match[0] if match else 'unknown'}
         self.append(event)
 
+        self.schedule_network('connection_failure', event)
+
     def append(self, event):
         self.events.append(event)
         if event.get('status', 0) >= 400 or event.get('service_error_codes') or event.get('network_error'):
@@ -318,6 +431,7 @@ class NetworkDiagnosis:
                 os.fchmod(stream.fileno(), 0o600)
                 json.dump({'started_at': self.started, 'browser': self.kind, 'runtime': self.runtime,
                            'page_samples': self.page_samples, 'health': self.health,
+                           'network_samples': list(self.network_samples),
                            'events': list(self.events)}, stream, ensure_ascii=False, indent=2)
             temporary.replace(self.path)
         except OSError:
@@ -326,6 +440,7 @@ class NetworkDiagnosis:
     async def close(self):
         if self.context is None:
             return
+        self.closed = True
         if self.sampler:
             self.sampler.cancel()
             await asyncio.gather(self.sampler, return_exceptions=True)
@@ -337,7 +452,11 @@ class NetworkDiagnosis:
         for page in self.pages:
             page.remove_listener('console', self.observe_console)
         if self.tasks:
-            await asyncio.gather(*tuple(self.tasks), return_exceptions=True)
+            pending = tuple(self.tasks)
+            try:
+                await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), 5)
+            except asyncio.TimeoutError:
+                await asyncio.gather(*pending, return_exceptions=True)
         if self.writer and not self.writer.done():
             self.writer.cancel()
             await asyncio.gather(self.writer, return_exceptions=True)

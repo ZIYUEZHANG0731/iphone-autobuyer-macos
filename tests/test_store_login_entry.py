@@ -22,6 +22,30 @@ ACCOUNT_URL = 'https://secure9.www.apple.com.cn/shop/account/home'
 REMEMBERED_MENU = '<a href="/shop/signOut">退出登录 测试账户</a><a href="'+ACCOUNT_URL+'">账户</a>'
 
 
+@pytest.mark.e2e
+async def test_slow_account_navigation_finishes_without_reclick_or_password(browser,tmp_path):
+    import asyncio,json
+    context=await browser.new_context()
+    page=await context.new_page()
+    requests=[]
+    async def respond(route):
+        requests.append((route.request.method,route.request.url))
+        if route.request.url==ACCOUNT_URL:
+            await asyncio.sleep(5.5)
+            body='<a href="/shop/signOut">退出登录 测试账户</a>'
+        else:
+            body=STORE_HTML.replace('MENU_JSON',json.dumps(REMEMBERED_MENU))
+        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
+    await context.route('**/*',respond)
+    worker=Worker('login',Settings(),tmp_path,interactive=False)
+    try:
+        result=await worker.browser_action(SimpleNamespace(page=page),None)
+        assert result['state']=='COMPLETED'
+        assert requests==[('GET',STORE_ENTRY),('GET',ACCOUNT_URL)]
+        assert page.url==ACCOUNT_URL and not page.is_closed()
+    finally:await context.close()
+
+
 @pytest.fixture
 async def browser():
     async with async_playwright() as pw:
@@ -73,6 +97,54 @@ async def test_logged_in_store_is_verified_through_its_visible_account_link_with
 
 
 @pytest.mark.e2e
+async def test_store_chooses_profile_login_when_saved_items_has_another_signin_context(browser,tmp_path):
+    target='https://secure9.www.apple.com.cn/shop/signIn?ssi=PRIVATE_PROFILE_CONTEXT'
+    menu='<p><a href="/shop/signIn?ssi=PRIVATE_FAVORITES_CONTEXT">登录</a>查看收藏商品</p>'
+    menu+='<div data-analytics-region="my profile"><ul><li><a data-ac-autom="gn-bagview-link-signIn" class="ac-gn-bagview-nav-link-signin" href="'+target+'">登录</a></li></ul></div>'
+    context,page,requests=await store_fixture(browser,menu)
+    worker=Worker('login',Settings(),tmp_path,interactive=False)
+    try:
+        result=await worker.browser_action(SimpleNamespace(page=page),None)
+        assert result['state']=='PAUSED'
+        assert requests==[STORE_ENTRY,target] and page.url==target
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_exact_duplicate_signin_links_keep_the_same_official_return_context(browser):
+    target='https://secure9.www.apple.com.cn/shop/signIn?ssi=PRIVATE_SAME_CONTEXT'
+    context,page,requests=await store_fixture(browser,2*f'<a href="{target}">登录</a>')
+    adapter=AppleAdapter(page,Control(False))
+    try:
+        await adapter.open_store_signin()
+        assert requests==[STORE_ENTRY,target]
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_profile_marker_never_allows_an_offsite_signin_destination(browser):
+    context,page,requests=await store_fixture(browser,
+        '<a href="/shop/signIn?ssi=PRIVATE">登录</a><a data-ac-autom="gn-bagview-link-signIn" href="https://apple.com.cn.attacker.invalid/shop/signIn">登录</a>')
+    try:
+        with pytest.raises(UserAction):await AppleAdapter(page,Control(False)).open_store_signin()
+        assert requests==[STORE_ENTRY]
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_login_action_reuses_current_protected_session_without_a_store_navigation(browser,tmp_path):
+    context,page,requests=await store_fixture(browser,REMEMBERED_MENU,authenticated=True)
+    await page.goto(ACCOUNT_URL)
+    worker=Worker('login',Settings(),tmp_path,interactive=False)
+    try:
+        result=await worker.browser_action(SimpleNamespace(page=page),None)
+        assert result['state']=='COMPLETED' and '无需重新登录' in result['message']
+        assert requests==[ACCOUNT_URL,ACCOUNT_URL] and page.url==ACCOUNT_URL
+        assert context.pages==[page]
+    finally:await context.close()
+
+
+@pytest.mark.e2e
 @pytest.mark.parametrize('menu',[
     '<a href="https://apple.com.cn.attacker.invalid/shop/signIn">登录</a>',
     '<a href="/shop/signIn?ssi=one">登录</a><a href="/shop/signIn?ssi=two">登录</a>',
@@ -87,11 +159,12 @@ async def test_store_menu_does_not_follow_untrusted_or_ambiguous_login_links(bro
 
 
 @pytest.mark.e2e
-async def test_diagnosis_keeps_current_query_style_signin_without_navigating_or_reading_password(browser,tmp_path):
+@pytest.mark.parametrize('action',['login','login_diagnosis'])
+async def test_login_keeps_current_query_style_signin_without_navigating_or_reading_password(browser,tmp_path,action):
     context,page,requests=await store_fixture(browser,'')
     target='https://secure9.www.apple.com.cn/shop/signIn?ssi=PRIVATE_MENU_CONTEXT'
     await page.goto(target)
-    worker=Worker('login_diagnosis',Settings(auto_login=True),tmp_path,interactive=False)
+    worker=Worker(action,Settings(auto_login=action=='login_diagnosis'),tmp_path,interactive=False)
     try:
         result=await worker.browser_action(SimpleNamespace(page=page),None)
         assert result['state']=='PAUSED' and requests==[target]
