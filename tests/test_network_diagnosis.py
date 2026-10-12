@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 
 from app.gui.worker import Worker
 from app.models.config import Settings
-from app.security.keychain import CredentialVault
+from app.security.vault import CredentialVault
 from app.services.network_diagnosis import NetworkDiagnosis, browser_capabilities, request_family, response_shape
 from app.services.login import STORE_ENTRY
 

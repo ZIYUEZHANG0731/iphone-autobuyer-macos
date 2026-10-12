@@ -3,6 +3,7 @@ import json
 import math
 from pathlib import Path
 import time
+from app.utils.files import write_private_json
 
 
 class SiteCooldown:
@@ -32,8 +33,7 @@ class SiteCooldown:
         # Repeated failed navigations back off; any server wait takes precedence.
         default=min(60,5*2**max(0,int(state['failures'])-1))
         state['until']=max(state['until'],now+max(float(requested),default))
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        self.path.write_text(json.dumps(state),encoding='utf-8');self.path.chmod(0o600)
+        write_private_json(self.path, state)
         return max(0,math.ceil(state['until']-now))
 
     def busy_remaining(self, *, now=None):
@@ -42,6 +42,5 @@ class SiteCooldown:
     def busy(self, requested, *, now=None):
         now=time.time() if now is None else now;state=self.load()
         state['busy_until']=max(state['busy_until'],now+max(0,float(requested)))
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        self.path.write_text(json.dumps(state),encoding='utf-8');self.path.chmod(0o600)
+        write_private_json(self.path, state)
         return max(0,math.ceil(state['busy_until']-now))

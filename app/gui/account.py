@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QFormLayout
 
 from app.models.config import ConfigError
 from app.models.credential import AppleCredential
+from app.platforms import vault_label
 
 
 class AccountDialog(QDialog):
@@ -14,7 +15,7 @@ class AccountDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(14)
-        note = QLabel('账号和密码仅保存到本机 macOS 钥匙串，用于 Apple 官网登录。')
+        note = QLabel(f'账号和密码仅保存到本机{vault_label()}，用于 Apple 官网登录。')
         note.setWordWrap(True)
         note.setObjectName('muted')
         layout.addWidget(note)
@@ -43,7 +44,7 @@ class AccountDialog(QDialog):
         help_text.setObjectName('muted')
         layout.addWidget(help_text)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText('保存到钥匙串')
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText('保存到安全存储')
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         buttons.accepted.connect(self.accept_checked)
         buttons.rejected.connect(self.reject)

@@ -8,6 +8,7 @@ import re
 from uuid import uuid4
 
 from app.models.flow import FlowError
+from app.utils.files import write_private_json
 
 
 @dataclass
@@ -68,10 +69,7 @@ class PaymentStore:
 
     @staticmethod
     def _write_manifest(path: Path, handoff: PaymentHandoff):
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(asdict(handoff), ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.chmod(0o600)
-        temporary.replace(path)
+        write_private_json(path, asdict(handoff))
 
     def image_path(self, handoff: PaymentHandoff) -> Path:
         if not re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg)", handoff.image_file):

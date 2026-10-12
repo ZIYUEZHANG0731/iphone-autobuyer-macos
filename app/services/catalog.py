@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlsplit
 from app.models.config import apple_url, money
 from app.utils.paths import resource_path
+from app.utils.files import write_private_json
 
 
 OPTION_TITLES={'dimensionColor':'颜色','dimensionCapacity':'容量','dimensionModel':'机型',
@@ -86,6 +87,4 @@ class CatalogCache:
         return []
 
     def save(self, products):
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        self.path.write_text(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'products':products},ensure_ascii=False,indent=2),encoding='utf-8')
-        self.path.chmod(0o600)
+        write_private_json(self.path, {'checked_at':datetime.now(timezone.utc).isoformat(),'products':products})

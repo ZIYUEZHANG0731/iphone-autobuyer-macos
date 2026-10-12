@@ -10,7 +10,7 @@ from app.automation.control import Control
 from app.models.config import ConfigError, Settings
 from app.models.credential import AppleCredential
 from app.models.flow import RateLimited, UserAction
-from app.security.keychain import CredentialVault
+from app.security.vault import CredentialVault
 from app.security.privacy import Redactor
 from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY
 from app.services.signin import SignInController, credential_origin

@@ -1,4 +1,4 @@
-"""Release metadata shared by the UI, Python package and macOS bundle."""
+"""Release metadata shared by the UI, Python package and desktop bundles."""
 
-__version__ = '0.6.5'
-__build__ = 26
+__version__ = '0.7.0'
+__build__ = 27

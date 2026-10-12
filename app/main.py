@@ -13,7 +13,7 @@ if __package__ in (None,''):
 from app.utils.paths import data_dir
 
 def parser():
-    p=argparse.ArgumentParser(description='Apple Store macOS 购买准备与官网试跑')
+    p=argparse.ArgumentParser(description='Apple Store 购买准备与官网试跑')
     p.add_argument('--live-check',action='store_true',help='官网试跑，到人工接管点为止，永不提交')
     p.add_argument('--local-test',choices=['all','first_available','second_available','all_unavailable','stock_changes','missing_option','payment_unavailable','identity_incomplete','maintenance','network_timeout','submit_timeout','delayed_success','order_failure','rate_limited','stop'])
     p.add_argument('--config',type=Path)
@@ -30,27 +30,18 @@ async def run_cli(args):
     from app.automation.engine import Engine
     from app.automation.control import Control
     from app.adapters.apple import AppleAdapter
-    from app.adapters.simulation import SimulationAdapter
-    from app.models.config import Mode,Settings,Identity
+    from app.models.config import Mode,Settings
     from app.services.storage import Repository
-    from app.services.simulation import SimStore,SCENARIOS,local_config
+    from app.services.simulation import SCENARIOS
+    from app.services.local_test import run_local
     from app.services.traffic import SiteCooldown
     from app.models.flow import FlowError
     root=data_dir();repo=Repository(root/'autobuyer.sqlite3');results=[]
     if args.local_test:
         names=list(SCENARIOS) if args.local_test=='all' else [args.local_test]
         for scenario in names:
-            config=local_config(scenario)
-            with SimStore(config,scenario) as server:
-                async with BrowserSession(root,headless=args.headless,isolated=True) as session:
-                    control=Control(interactive=False);engine=Engine(repo,control,callback=lambda e:print(json.dumps(e,ensure_ascii=False)))
-                    stopper=None
-                    if scenario=='stop':
-                        async def stopping():await asyncio.sleep(.8);control.stop()
-                        stopper=asyncio.create_task(stopping())
-                    result=asdict(await engine.run(config,SimulationAdapter(session.page,server,control),Mode.LOCAL_TEST,None if scenario=='identity_incomplete' else Identity.synthetic()))
-                    if stopper:await stopper
-                    result.update(scenario=scenario,submit_count=server.submit_count,synthetic_orders=len(server.orders));results.append(result)
+            results.append(await run_local(scenario, root, repo, Control(interactive=False),
+                headless=args.headless, callback=lambda e:print(json.dumps(e,ensure_ascii=False))))
     else:
         config=Settings.from_dict(json.loads(args.config.read_text(encoding='utf-8'))) if args.config else repo.load_config()
         config.auto_submit=False;config.transmit_identity=False

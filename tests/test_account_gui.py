@@ -55,7 +55,7 @@ def test_daily_chrome_button_selects_connection_and_checks_login(qt,tmp_path,mon
 
 
 def test_gui_saves_credentials_to_vault_and_only_reference_to_sqlite(qt,tmp_path,monkeypatch):
-    import app.gui.window as module
+    import app.gui.browser_controls as module
     stored={}
     vault=SimpleNamespace(put=lambda key,credential:stored.update({key:credential}),
                           get=lambda key:stored[key],delete=lambda key:stored.pop(key))

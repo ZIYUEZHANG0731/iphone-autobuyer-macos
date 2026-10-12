@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import socket
-import sys
 import time
 from playwright.async_api import async_playwright
 from app.models.flow import FlowError
@@ -10,14 +9,7 @@ from app.models.config import apple_url
 from urllib.parse import urlsplit
 from app.services.chrome_session import find_owned_chrome
 from app.services.login import account_page_url
-
-
-def installed_chrome() -> Path | None:
-    if sys.platform != 'darwin':return None
-    for root in (Path('/Applications'),Path.home()/'Applications'):
-        path=root/'Google Chrome.app'/'Contents'/'MacOS'/'Google Chrome'
-        if path.is_file():return path
-    return None
+from app.platforms import installed_chrome
 
 
 class BrowserSession:

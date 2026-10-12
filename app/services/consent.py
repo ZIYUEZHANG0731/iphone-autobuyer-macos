@@ -21,7 +21,7 @@ NOTICE_MORE = '我们提供包括 Apple 隐私政策在内的更多信息。进�
 
 
 def canonical_notice(text):
-    return re.sub(r'[\s↗]', '', text)
+    return re.sub(r'[\s↗\u200b\ufeff]', '', text)
 
 
 NOTICE_TEXT = '\n'.join((NOTICE_TITLE, *NOTICE_INTRO, *NOTICE_CHOICES, NOTICE_MORE))
@@ -38,3 +38,14 @@ def matches_saved_notice(snapshot, config):
             and all(canonical_notice(actual) == canonical_notice(expected)
                     for actual, expected in zip(choices, NOTICE_CHOICES))
             and canonical_notice(snapshot.get('notice_text', '')) == canonical_notice(NOTICE_TEXT))
+
+
+def consent_reason(snapshot, config, *, used=False):
+    if not config or not (config.privacy_policy_accepted and config.privacy_transfer_acknowledged):
+        return '本次任务未带入两项提前同意，请先勾选并保存，再重新开始试跑'
+    if config.privacy_notice_version != NOTICE_VERSION:
+        return '提前同意的声明版本未保存，请重新保存付款与授权'
+    if used:return '本次确认已尝试，官网仍显示声明；请核对页面，不重复提交'
+    if not snapshot or not snapshot.get('notice_text'):return '官网声明暂未完整读取，已保留页面'
+    if not matches_saved_notice(snapshot, config):return '官网声明内容与提前同意的版本不同，请查看当前声明'
+    return '已识别提前同意的声明，正在确认官网选项'

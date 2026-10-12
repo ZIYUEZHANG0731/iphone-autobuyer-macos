@@ -151,3 +151,69 @@ async def test_saved_checkout_choice_does_not_apply_to_an_account_page(consent_p
     adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
     with pytest.raises(UserAction):await adapter.guard()
     assert await page.evaluate('window.accepts')==0
+
+
+def styled_notice(kind='native'):
+    choices=[]
+    for index,label in enumerate(NOTICE_CHOICES):
+        if kind=='native':
+            choice=f'<input id="choice{index}" type="checkbox" style="position:absolute;opacity:0;pointer-events:none"><label for="choice{index}">{label}</label>'
+        else:
+            choice=f'<span role="checkbox" tabindex="0" style="display:inline-block;width:20px;height:20px;border:1px solid" aria-checked="false" aria-labelledby="label{index}" onclick="this.setAttribute(\'aria-checked\',this.getAttribute(\'aria-checked\')!==\'true\');update()"></span><span id="label{index}">{label}</span>'
+        choices.append(f'<div>{choice}</div>')
+    return f'''<main><article role="dialog"><h1>{NOTICE_TITLE}</h1>
+      <p>{NOTICE_INTRO[0]}</p><p>{NOTICE_INTRO[1]}</p>{''.join(choices)}
+      <p>{NOTICE_MORE}</p><div hidden>隐藏的旧弹窗模板与旧条款</div>
+      <button id="accept" disabled onclick="window.accepts++;document.querySelector('article').innerHTML='<h1>取货方式</h1>'">同意并继续</button>
+      <button aria-label="关闭">×</button><a href="#">不同意并继续购物</a>
+      </article></main><script>
+      window.accepts=0;
+      function update(){{const choices=document.querySelector('article').querySelectorAll('input,[role="checkbox"]');
+        document.querySelector('#accept').disabled=!Array.from(choices).every(e=>e.checked||e.getAttribute('aria-checked')==='true');}}
+      document.addEventListener('change',update);
+      document.addEventListener('keydown',e=>{{if(e.code==='Space')e.preventDefault();}});
+      </script>'''
+
+
+@pytest.mark.parametrize('kind',['native','role'])
+async def test_saved_notice_accepts_styled_controls_and_close_button_without_keyboard(consent_page,kind):
+    page=consent_page;await page.set_content(styled_notice(kind));events=[]
+    assert await page.get_by_role('button',name='同意并继续',exact=True).is_disabled()
+    adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    adapter.privacy_config=saved_privacy_settings()
+    await adapter.guard()
+    assert await page.get_by_role('heading',name='取货方式').is_visible()
+    assert await page.evaluate('window.accepts')==1
+    assert any(k=='consent_completed' and d['source']=='saved' for k,d in events)
+
+
+async def test_unchecked_control_failure_does_not_consume_saved_submission(consent_page,monkeypatch):
+    import app.adapters.apple_consent as consent_module
+    page=consent_page;await page.set_content(styled_notice())
+    adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
+    activate=consent_module.ensure_checked
+    async def unavailable(*args,**kwargs):raise UserAction('fixture control not ready')
+    monkeypatch.setattr(consent_module,'ensure_checked',unavailable)
+    with pytest.raises(UserAction,match='勾选隐私政策.*尚未提交确认'):await adapter.guard()
+    assert not adapter.preconsent_used and await page.evaluate('window.accepts')==0
+    monkeypatch.setattr(consent_module,'ensure_checked',activate)
+    await adapter.guard()
+    assert await page.evaluate('window.accepts')==1 and adapter.preconsent_used
+
+
+async def test_mismatch_diagnostic_does_not_report_a_failed_click(consent_page):
+    page=consent_page;await page.set_content(styled_notice().replace(NOTICE_INTRO[1],'新的可见条款。'));events=[]
+    adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    adapter.privacy_config=saved_privacy_settings()
+    with pytest.raises(UserAction):await adapter.guard()
+    assert next(d for k,d in events if k=='consent_status')=='官网声明内容与提前同意的版本不同，请查看当前声明'
+    assert not adapter.preconsent_used and await page.evaluate('window.accepts')==0
+
+
+async def test_background_checkout_checkbox_is_not_part_of_notice_or_automatically_selected(consent_page):
+    page=consent_page
+    await page.set_content('<label><input type="checkbox" id="outside">其他结账选择</label>'+styled_notice())
+    adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
+    await adapter.guard()
+    assert await page.evaluate('window.accepts')==1
+    assert not await page.locator('#outside').is_checked()

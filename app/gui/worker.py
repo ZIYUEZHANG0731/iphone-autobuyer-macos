@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 from copy import deepcopy
-import platform
 from pathlib import Path
 import queue
 import re
@@ -13,17 +12,16 @@ import math
 from playwright.async_api import Error as PlaywrightError
 from urllib.parse import urlsplit
 from PySide6.QtCore import QThread, Signal
-from app.models.config import Mode, Identity, ConfigError
+from app.models.config import Mode, ConfigError
 from app.models.flow import FlowError, UserAction, Stopped, RateLimited
 from app.automation.control import Control, ProcessLock
 from app.automation.browser import BrowserSession, installed_chrome
 from app.automation.engine import Engine
 from app.adapters.apple import AppleAdapter
-from app.adapters.simulation import SimulationAdapter
-from app.services.simulation import SimStore, local_config
+from app.services.local_test import run_local
 from app.services.storage import Repository
 from app.services.payment import PaymentStore
-from app.security.keychain import IdentityVault, CredentialVault
+from app.security.vault import IdentityVault, CredentialVault
 from app.security.privacy import Redactor
 from app.utils.power import KeepAwake
 from app.services.catalog_reader import read_catalog
@@ -31,6 +29,7 @@ from app.services.traffic import SiteCooldown
 from app.services.signin import SignInController
 from app.services.login import apple_auth_url, shop_signin_url, session_page_url
 from app.services.network_diagnosis import NetworkDiagnosis
+from app.platforms import system_label, vault_label
 
 
 class Worker(QThread):
@@ -100,22 +99,25 @@ class Worker(QThread):
         self.data.emit(kind, data)
 
     async def environment(self):
+        browser_kind = self.config.browser_kind
         if self.config.browser_kind=='daily_chrome':
             from app.services.daily_chrome import extension_installed
-            installed=extension_installed()
-            return {'state':'COMPLETED','message':f'macOS {platform.mac_ver()[0]} · {platform.machine()}\n日常 Chrome · '+('官方连接扩展已安装，请接入后复核官网登录' if installed else '请从官网浏览器页面安装官方 Playwright Extension'),
-                    'browser_installed':bool(installed_chrome() and installed)}
-        if self.config.browser_kind=='embedded':
+            extension = extension_installed()
+            installed = bool(installed_chrome() and extension)
+            browser = '日常 Chrome · '+('官方连接扩展已安装，请接入后复核官网登录' if extension else '请从官网浏览器页面安装官方 Playwright Extension')
+        elif browser_kind=='embedded':
             from importlib.util import find_spec
-            available=find_spec('PySide6.QtWebEngineWidgets') is not None
             from PySide6.QtCore import qVersion
-            return {'state':'COMPLETED','message':f'macOS {platform.mac_ver()[0]} · {platform.machine()}\n内置 Chromium / Qt {qVersion()} · 持久会话\nmacOS Keychain 用于取货人资料','browser_installed':available}
-        from playwright.async_api import async_playwright
-        async with async_playwright() as pw:
-            installed = Path(pw.chromium.executable_path).exists()
-        chrome=installed_chrome()
-        from keyring.backends.macOS import Keyring
-        return {'state': 'COMPLETED', 'message': f'macOS {platform.mac_ver()[0]} · {platform.machine()} · Python {platform.python_version()}\n浏览器：' + ('Google Chrome（软件独立会话）' if chrome else 'Chromium 已安装' if installed else '未安装，请点击安装浏览器') + '\nmacOS Keychain 后端：' + type(Keyring()).__name__, 'browser_installed': bool(chrome or installed)}
+            installed = find_spec('PySide6.QtWebEngineWidgets') is not None
+            browser = f'内置 Chromium / Qt {qVersion()} · 持久会话'
+        else:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as pw:
+                installed = Path(pw.chromium.executable_path).exists()
+            chrome = installed_chrome()
+            browser = 'Google Chrome（软件独立会话）' if chrome else 'Chromium 已安装' if installed else '未安装，请点击安装浏览器'
+            installed = bool(chrome or installed)
+        return {'state':'COMPLETED', 'message':f'{system_label()}\n浏览器：{browser}\n安全存储：{vault_label()}', 'browser_installed':installed}
 
     async def workflow(self):
         repo = Repository(self.root / 'autobuyer.sqlite3', Redactor())
@@ -128,22 +130,10 @@ class Worker(QThread):
                 raise FlowError('浏览器下载未成功，请检查网络后重试')
             return {'state': 'COMPLETED', 'message': 'Chromium 已安装', 'browser_installed': True}
         if self.action == 'local':
-            config = local_config(self.config.scenario)
-            with SimStore(config, config.scenario) as server:
-                async with BrowserSession(self.root, headless=self.headless, isolated=True) as session:
-                    engine = Engine(repo, self.control, callback=self.event.emit)
-                    identity = None if config.scenario == 'identity_incomplete' else Identity.synthetic()
-                    stop_task = None
-                    if config.scenario == 'stop':
-                        async def stopper():
-                            await asyncio.sleep(.8)
-                            self.control.stop()
-                        stop_task = asyncio.create_task(stopper())
-                    result = await engine.run(config, SimulationAdapter(session.page, server, self.control), Mode.LOCAL_TEST, identity)
-                    if stop_task:
-                        await stop_task
-                    self.data.emit('simulation', {'submit_count': server.submit_count, 'synthetic_orders': len(server.orders)})
-                    return asdict(result)
+            result = await run_local(self.config.scenario, self.root, repo, self.control,
+                                     headless=self.headless, callback=self.event.emit)
+            self.data.emit('simulation', {key:result[key] for key in ('submit_count','synthetic_orders')})
+            return result
         # One process stays open through login, setup and the scheduled run.
         # This retains session-only cookies, which may disappear on a restart.
         with ProcessLock(repo.path.with_suffix('.run.lock')):

@@ -13,16 +13,16 @@ from PySide6.QtGui import QColor,QIcon,QPainter,QPixmap
 from PySide6.QtWidgets import (QMainWindow,QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QLayout,
  QFormLayout,QStackedWidget,QScrollArea,QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QCheckBox,QDateTimeEdit,
  QTableWidget,QTableWidgetItem,QHeaderView,QListWidget,QListWidgetItem,QAbstractItemView,QPlainTextEdit,QTabWidget,
- QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QDialogButtonBox,QSizePolicy,QApplication)
+ QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QSizePolicy,QApplication)
 from app import __version__
-from app.models.config import Settings,Product,Store,Identity,Mode,State,STATE_LABELS,ConfigError
+from app.models.config import Settings,Product,Store,Mode,State,STATE_LABELS,ConfigError
 from app.models.flow import FlowError
 from app.services.storage import Repository
 from app.services.simulation import SCENARIOS
-from app.security.keychain import IdentityVault, CredentialVault
-from app.gui.account import AccountDialog
 from app.security.privacy import Redactor
 from app.gui.worker import Worker
+from app.gui.browser_controls import BrowserControls
+from app.gui.profiles import ProfileControls, ProfileDialog
 from app.gui.payment import PaymentDialog
 from app.gui.payment_settings import PaymentChoices
 from app.gui.product_settings import ProductChoices
@@ -38,45 +38,10 @@ from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOT
 from app.services.stores import StoreDirectory
 from app.services.network_diagnosis import FAMILY_LABELS
 from app.services.network_state import network_summary
-from app.services.daily_chrome import EXTENSION_URL
 from app.utils.qt import single_shot
 
-class ProfileDialog(QDialog):
-    def __init__(self,parent=None,identity=None,alias=''):
-        super().__init__(parent);self.setWindowTitle('取货人');self.resize(480,350)
-        layout=QVBoxLayout(self);layout.setContentsMargins(20,18,20,18);layout.setSpacing(14)
-        note=QLabel('Apple 取货只需证件后四位，不需要完整身份证号码。\n取货信息仅保存到 macOS 钥匙串。');note.setWordWrap(True);note.setObjectName('muted');layout.addWidget(note)
-        previous_type=identity.document_type if identity else '居民身份证'
-        self.document_type=previous_type if '后四位' in previous_type else previous_type+'后四位'
-        form=QFormLayout();form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft);form.setSpacing(10);self.fields={}
-        for key,label in [('alias','显示别名'),('family_name','姓氏'),('given_name','名字'),('document_number','证件后四位'),('phone','手机号码'),('email','电子邮箱')]:
-            widget=QLineEdit();widget.setAccessibleName(label)
-            widget.setText(alias if key=='alias' else getattr(identity,key,'') if identity else '')
-            if key=='document_number':
-                if identity:widget.setText(identity.document_number[-4:].upper())
-                widget.setEchoMode(QLineEdit.EchoMode.Password)
-                widget.setPlaceholderText('四位数字，末位可为 X')
-                # Do not use maxLength(4): pasting a full ID would silently keep
-                # its first four characters rather than rejecting the input.
-            self.fields[key]=widget;form.addRow(label,widget)
-        layout.addLayout(form)
-        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText('保存')
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
-        buttons.accepted.connect(self.accept_checked);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
-    def identity(self):
-        values={k:v.text().strip() for k,v in self.fields.items() if k!='alias'}
-        values['document_number']=values['document_number'].upper()
-        return Identity(name=values['family_name']+values['given_name'],document_type=self.document_type,**values)
-    def accept_checked(self):
-        try:
-            self.identity().validate()
-            if not self.fields['alias'].text().strip():raise ConfigError('请填写不含证件号码的显示别名')
-            self.accept()
-        except ConfigError as exc:QMessageBox.information(self,'请检查',str(exc))
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, BrowserControls, ProfileControls):
     def __init__(self,root:Path):
         super().__init__();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
         self.worker=None;self.closing=False;self.catalog_cache=CatalogCache(root);self.catalog=self.catalog_cache.load();self.store_results=[];self.run_events=[]
@@ -162,12 +127,6 @@ class MainWindow(QMainWindow):
         self.label(l,'目录只用于提前选择。开售后按所选城市读取官网供货，结账时再次核对；目录不代表有货。','muted')
         row=QHBoxLayout();self.pickup_from=QLineEdit();self.pickup_from.setPlaceholderText('最早 YYYY-MM-DD，可留空');self.pickup_to=QLineEdit();self.pickup_to.setPlaceholderText('最晚 YYYY-MM-DD，可留空');row.addWidget(QLabel('可接受取货日期'));row.addWidget(self.pickup_from);row.addWidget(self.pickup_to);self.button(row,'保存门店设置',self.save,'primary');l.addLayout(row)
 
-    def build_profiles(self):
-        l=self.page('取货人','证件、手机号和邮箱保存在 macOS 钥匙串，本机记录只保留显示别名。')
-        frame,c=self.card();self.label(c,'官网实测：姓氏 + 名字 + 联系方式 + 证件后四位','eyebrow');self.label(c,'证件只填写后四位，末位 X 也可填写。出现手机号验证时在官网填写验证码。','muted');l.addWidget(frame)
-        self.profile_table=self.table(['显示别名','默认取货人','存储位置']);self.profile_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);l.addWidget(self.profile_table,1)
-        row=QHBoxLayout();self.button(row,'添加取货人',self.add_profile,'primary');self.button(row,'编辑',self.edit_profile);self.button(row,'设为默认',self.default_profile);self.button(row,'删除',self.delete_profile);l.addLayout(row)
-        self.label(l,'先运行官网试跑也可以不保存身份；软件会到取货人页面暂停，允许你直接在官网填写。','muted')
 
     def build_payments(self):
         l=self.page('付款与授权','直接选择付款方案，勾选需要的授权。')
@@ -184,8 +143,8 @@ class MainWindow(QMainWindow):
         self.label(c,'备用付款方式','eyebrow');c.addWidget(self.payment_choices.backups)
         self.label(c,'勾选需要的备用方式，可拖动排序。官网会重新确认可用方式与期数。','muted');row.addWidget(frame,1)
         frame,c=self.card();c.addLayout(section_header('填写与下单'));c.addWidget(divider())
-        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写所选 Keychain 取货人信息');c.addWidget(self.transmit)
-        self.label(c,'向 Apple 中国大陆官网填写钥匙串中的姓名、联系方式和证件字段。','muted');c.addWidget(divider())
+        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写安全存储中的取货人信息');c.addWidget(self.transmit)
+        self.label(c,'向 Apple 中国大陆官网填写已保存的姓名、联系方式和证件字段。','muted');c.addWidget(divider())
         self.auto=QCheckBox('条件满足后自动提交订单');self.auto.setAccessibleName('允许在预设条件满足时自动提交真实订单');c.addWidget(self.auto)
         self.label(c,'仅用于真实购买。商品、数量、金额、门店和付款方案须通过最终核对；付款由你完成。','muted');c.addStretch()
         self.label(c,'自动提交目前只支持招商银行 24 期；官网缺少最终门店信息时，仍会请你核对。','muted')
@@ -257,7 +216,7 @@ class MainWindow(QMainWindow):
         self.button(row,'打开浏览器',self.focus_browser);r.addLayout(row)
         row=QHBoxLayout();self.button(row,'检查登录状态',lambda:self.launch('login_check'))
         self.close_session_button=self.button(row,'关闭会话',self.close_session);self.close_session_button.setEnabled(False);r.addLayout(row)
-        self.keep_awake=QCheckBox('防止 Mac 自动睡眠');r.addWidget(self.keep_awake)
+        self.keep_awake=QCheckBox('会话期间防止电脑自动睡眠');r.addWidget(self.keep_awake)
         self.keep_awake.setToolTip('建议连接电源。停止任务会保留浏览器会话，关闭会话才会退出浏览器。')
         r.addWidget(divider());self.label(r,'停止任务会保留浏览器会话。','muted');r.addSpacing(8);r.addWidget(divider())
         row=QHBoxLayout();self.button(row,'查看付款二维码',self.show_payment);self.button(row,'提取当前付款码',self.request_payment);r.addLayout(row)
@@ -325,122 +284,6 @@ class MainWindow(QMainWindow):
         row=QHBoxLayout();self.button(row,'刷新记录',self.refresh_logs);self.button(row,'导出脱敏日志',self.export_logs);self.button(row,'继续当前浏览器',self.resume);self.button(row,'恢复检查 / 重新准备',self.recover);l.addLayout(row)
         self.label(l,'恢复会重新验证页面与配置；已提交或结果未知的购买计划只允许核对，不重新提交。停止程序不会自动取消已有订单。','muted')
 
-    def build_browser(self):
-        page=QWidget();self.browser_layout=QVBoxLayout(page);self.browser_layout.setContentsMargins(24,18,24,16);self.browser_layout.setSpacing(12)
-        self.label(self.browser_layout,'官网浏览器','title')
-        self.browser_hint=self.label(self.browser_layout,'提前保存账户并完成首次验证，购买时沿用同一浏览器。验证码仍在官网页面填写。','muted')
-        account_row=QHBoxLayout()
-        self.account_status=QLabel();self.account_status.setObjectName('muted');account_row.addWidget(self.account_status,1)
-        self.account_button=self.button(account_row,'保存 Apple 账户…',self.configure_account)
-        self.remove_account_button=self.button(account_row,'删除保存账号',self.remove_account)
-        self.browser_layout.addLayout(account_row)
-        row=QHBoxLayout();self.button(row,'内置浏览器登录',self.login_embedded,'primary');self.button(row,'独立 Chrome 登录',self.login_chrome);row.addStretch();self.browser_layout.addLayout(row)
-        row=QHBoxLayout();self.button(row,'已完成登录，检查',self.complete_browser_login)
-        self.button(row,'检查登录状态',lambda:self.launch('login_check'));self.button(row,'记录登录问题',lambda:self.launch('login_diagnosis'));row.addStretch();self.browser_layout.addLayout(row)
-        row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome,'primary');self.button(row,'安装 Chrome 连接扩展…',self.open_chrome_extension);row.addStretch();self.browser_layout.addLayout(row)
-        self.label(self.browser_layout,'日常 Chrome：先在官网正常登录，再通过 Microsoft 官方 Playwright 扩展选择一个 Apple 中国商店页面。关闭软件会话会断开连接，Chrome 和原有登录继续保留。','muted')
-        self.browser_session_note=self.label(self.browser_layout,'登录诊断会随实际运行的浏览器记录；切换浏览器需要先关闭当前会话。','muted')
-        self.network_note=self.label(self.browser_layout,'登录期间自动记录本机网络变化；已有会话与验证码在同一浏览器保留。','muted')
-        self.browser_holder=QWidget();self.browser_holder_layout=QVBoxLayout(self.browser_holder);self.browser_holder_layout.setContentsMargins(0,0,0,0)
-        self.browser_placeholder=self.label(self.browser_holder_layout,'选择内置浏览器或独立 Chrome 登录。完成后可回控制台设置开售时间。','muted');self.browser_holder_layout.addStretch();self.browser_layout.addWidget(self.browser_holder,1)
-        self.stack.addWidget(page)
-
-    def update_account_status(self):
-        saved=bool(self.config.credential_id)
-        self.account_status.setText('已保存到钥匙串 · '+('自动登录已开启' if self.config.auto_login else '自动登录未开启')+(' · 已预选信任此浏览器' if self.config.auto_login and self.config.trust_browser else '') if saved else '尚未保存 Apple 账户')
-        self.account_button.setText('管理 Apple 账户…' if saved else '保存 Apple 账户…')
-        self.remove_account_button.setEnabled(saved)
-
-    def configure_account(self):
-        if self.worker and self.worker.isRunning() and not self.worker.idle:
-            self.message_label.setText('请先停止当前任务，再修改保存的 Apple 账户。');return
-        try:
-            vault=CredentialVault();previous=vault.get(self.config.credential_id) if self.config.credential_id else None
-            dialog=AccountDialog(self,credential=previous,auto_login=self.config.auto_login,trust_browser=self.config.trust_browser)
-            try:
-                if dialog.exec()!=QDialog.DialogCode.Accepted:return
-                credential=dialog.credential();new_id=str(uuid4());old_id=self.config.credential_id
-                vault.put(new_id,credential)
-                updated=deepcopy(self.config);updated.credential_id=new_id;updated.auto_login=dialog.auto_login.isChecked();updated.trust_browser=updated.auto_login and dialog.trust_browser.isChecked()
-                try:self.repo.save_config(updated)
-                except Exception:
-                    vault.delete(new_id);raise
-                self.config=updated;self.redactor.register(credential);self.update_account_status()
-                self.message_label.setText('Apple 账户已保存到本机钥匙串。请提前登录并完成首次验证。')
-                if old_id:vault.delete(old_id)
-            finally:
-                dialog.password.clear();dialog.previous=None;dialog.deleteLater()
-        except (FlowError,ConfigError) as exc:QMessageBox.information(self,'Apple 账户',str(exc))
-
-    def remove_account(self):
-        if self.worker and self.worker.isRunning() and not self.worker.idle:
-            self.message_label.setText('请先停止当前任务，再删除保存的 Apple 账户。');return
-        if not self.config.credential_id:return
-        if QMessageBox.question(self,'删除保存账号','删除本机钥匙串中的 Apple 账户和密码？浏览器里的现有登录仍然保留。',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:return
-        try:
-            self.config.auto_login=False;self.config.trust_browser=False;self.repo.save_config(self.config)
-            CredentialVault().delete(self.config.credential_id)
-            self.config.credential_id='';self.repo.save_config(self.config);self.update_account_status()
-        except FlowError as exc:QMessageBox.information(self,'Apple 账户',str(exc));self.update_account_status()
-
-    def login_embedded(self):
-        self.login_browser('embedded')
-
-    def login_chrome(self):
-        self.login_browser('chrome')
-
-    def login_browser(self,kind):
-        if self.worker and self.worker.isRunning():
-            if not self.worker.idle:
-                self.message_label.setText('先停止当前任务，再切换登录浏览器。');return
-            current=getattr(self.worker,'session_kind','embedded' if self.worker.embedded else 'chrome')
-            if current==kind:
-                self.launch('login');return
-            self.pending_browser_action='login';self.browser_kind.setCurrentIndex(self.browser_kind.findData(kind));self.close_session();return
-        self.browser_kind.setCurrentIndex(self.browser_kind.findData(kind));self.launch('login')
-
-    def connect_daily_chrome(self):
-        if self.worker and self.worker.isRunning():
-            if not self.worker.idle:
-                self.message_label.setText('请先停止当前任务，再接入日常 Chrome。');return
-            if getattr(self.worker,'session_kind','')!='daily_chrome':
-                self.pending_browser_action='login_check';self.browser_kind.setCurrentIndex(self.browser_kind.findData('daily_chrome'));self.close_session();return
-        self.browser_kind.setCurrentIndex(self.browser_kind.findData('daily_chrome'));self.launch('login_check')
-
-    def open_chrome_extension(self):
-        from PySide6.QtCore import QProcess
-        from app.automation.browser import installed_chrome
-        chrome=installed_chrome()
-        if not chrome:
-            QMessageBox.information(self,'Chrome 连接扩展','请先安装 Google Chrome，再从官网浏览器页面安装官方扩展。');return
-        # Open the official listing in the everyday profile. The user decides
-        # whether to grant the extension's debugger permission in Chrome.
-        started,_=QProcess.startDetached(str(chrome),[EXTENSION_URL])
-        self.message_label.setText('请在日常 Chrome 审阅并安装 Microsoft 官方 Playwright Extension，再点“接入日常 Chrome”。' if started else '未能打开 Chrome，请手动在 Chrome Web Store 搜索 Playwright Extension（Microsoft）。')
-
-    def complete_browser_login(self):
-        self.launch('login_check')
-
-    def show_active_browser(self,kind):
-        if self.embedded_browser is not None:
-            self.embedded_browser.setVisible(kind=='embedded')
-        if kind=='embedded':
-            self.browser_placeholder.hide()
-        else:
-            if self.browser_holder_layout.indexOf(self.browser_placeholder)<0:
-                self.browser_holder_layout.addWidget(self.browser_placeholder)
-            self.browser_placeholder.setText('当前使用日常 Chrome。登录与购买都在已连接的 Apple 页面进行。' if kind=='daily_chrome' else '当前使用软件独立 Chrome。登录与购买都在该 Chrome 窗口进行，可从控制台点击“打开浏览器”。')
-            self.browser_placeholder.show()
-
-    def ensure_embedded(self):
-        if self.embedded_browser is None:
-            from app.gui.browser import EmbeddedBrowser
-            self.embedded_browser=EmbeddedBrowser(self.root,self.browser_holder)
-            self.browser_placeholder.hide();self.browser_holder_layout.removeWidget(self.browser_placeholder)
-            while self.browser_holder_layout.count():self.browser_holder_layout.takeAt(0)
-            self.browser_holder_layout.addWidget(self.embedded_browser,1)
-        self.show_active_browser('embedded')
-        return {'endpoint':self.embedded_browser.endpoint,'primary_id':self.embedded_browser.primary_id,'bridge':self.embedded_browser.bridge}
 
     def populate(self):
         self.update_account_status()
@@ -464,11 +307,6 @@ class MainWindow(QMainWindow):
         self.scenario.setCurrentIndex(max(0,self.scenario.findData(self.config.scenario)))
         self.target_label.setText(f'{p.name} · 数量 {p.quantity} · 最大总金额 RMB {p.max_total}')
         self.refresh_plan_summary(self.config)
-    def append_option(self,key,value,choices=None):
-        offer=deepcopy(self.product_choices.offer);options=self.product_choices.selected_options();options[key]=value
-        if choices:
-            groups=groups_from_controls([dict(c,name=key,kind='radio') for c in choices]);offer['groups']=[g for g in offer.get('groups',[]) if g['key']!=key]+groups
-        self.product_choices.show_offer(offer,options)
     def append_store(self,store):
         item=QListWidgetItem(f'{store.name}  ·  {store.city}');item.setData(Qt.ItemDataRole.UserRole,store);item.setFlags(item.flags()|Qt.ItemFlag.ItemIsUserCheckable|Qt.ItemFlag.ItemIsDragEnabled);item.setCheckState(Qt.CheckState.Checked if store.enabled else Qt.CheckState.Unchecked);self.store_list.addItem(item)
     def collect(self):
@@ -545,36 +383,6 @@ class MainWindow(QMainWindow):
     def remove_store(self):
         row=self.store_list.currentRow()
         if row>=0:self.store_list.takeItem(row)
-    def refresh_profiles(self):
-        self.profiles=self.repo.profiles();self.profile_table.setRowCount(len(self.profiles))
-        for row,p in enumerate(self.profiles):
-            for col,value in enumerate([p['alias'],'默认' if p['id']==self.config.profile_id else '','macOS Keychain']):self.profile_table.setItem(row,col,QTableWidgetItem(value))
-    def store_profile(self,dialog,profile_id):
-        if dialog.exec()!=QDialog.DialogCode.Accepted:return
-        try:
-            identity=dialog.identity();self.redactor.register(identity);IdentityVault().put(profile_id,identity);self.repo.save_alias(profile_id,dialog.fields['alias'].text().strip())
-            if not self.config.profile_id:self.config.profile_id=profile_id
-            self.repo.save_config(self.config);self.refresh_profiles()
-        except FlowError as exc:QMessageBox.information(self,'Keychain',str(exc))
-    def add_profile(self):self.store_profile(ProfileDialog(self),str(uuid4()))
-    def edit_profile(self):
-        row=self.profile_table.currentRow()
-        if row<0:return
-        p=self.profiles[row]
-        try:self.store_profile(ProfileDialog(self,IdentityVault().get(p['id']),p['alias']),p['id'])
-        except FlowError as exc:QMessageBox.information(self,'Keychain',str(exc))
-    def default_profile(self):
-        row=self.profile_table.currentRow()
-        if row>=0:self.config.profile_id=self.profiles[row]['id'];self.repo.save_config(self.config);self.refresh_profiles()
-    def delete_profile(self):
-        row=self.profile_table.currentRow()
-        if row<0:return
-        p=self.profiles[row]
-        try:
-            IdentityVault().delete(p['id']);self.repo.remove_alias(p['id'])
-            if self.config.profile_id==p['id']:self.config.profile_id=''
-            self.repo.save_config(self.config);self.refresh_profiles()
-        except FlowError as exc:QMessageBox.information(self,'Keychain',str(exc))
     def export_config(self):
         self.save();path,_=QFileDialog.getSaveFileName(self,'导出非敏感配置','Apple配置.json','JSON (*.json)')
         if path:Path(path).write_text(json.dumps(self.config.to_dict(),ensure_ascii=False,indent=2),encoding='utf-8')
@@ -723,13 +531,15 @@ class MainWindow(QMainWindow):
                 self.show_active_browser(data['kind'])
         elif kind=='price_confirmation':self.show_price_choice(data)
         elif kind=='price_confirmed':self.console_log.appendPlainText(f'已接受本次官网价格：RMB {float(data["amount"]):,.2f}')
+        elif kind=='consent_status':self.console_log.appendPlainText('隐私确认：'+data)
         elif kind=='consent_required':self.show_consent_help(data)
         elif kind=='consent_completed':
             self.clear_consent();self.console_log.appendPlainText('已按提前保存的选择完成 Apple 隐私确认；继续检查官网结账' if data.get('source')=='saved' else '已按本次选择完成 Apple 隐私确认；继续检查官网结账')
         elif kind=='browser_focus_error':self.message_label.setText(data)
         elif kind=='embedded_focus':self.showNormal();self.stack.setCurrentIndex(6);self.activateWindow()
-        elif kind=='auth_focus':
-            if self.worker and self.worker.embedded:self.stack.setCurrentIndex(6)
+        elif kind in ('auth_focus','browser_focus'):
+            if self.worker and self.worker.embedded:
+                self.showNormal();self.stack.setCurrentIndex(6)
         elif kind=='auto_login':self.console_log.appendPlainText(data['message'])
         elif kind=='network_diagnosis':
             if data.get('network_error')=='net::ERR_ABORTED':return
@@ -794,7 +604,7 @@ class MainWindow(QMainWindow):
                     and not self.worker.control.stop_event.is_set())
         self.consent_entry.setEnabled(active);self.console_consent_entry.setVisible(active)
         saved=self.privacy_policy.isChecked() and self.privacy_transfer.isChecked()
-        self.consent_status.setText('当前官网声明需重新确认，请查看内容。' if active else '两项已勾选；保存后自动处理相同声明。' if saved else '勾选两项并保存，即可提前完成这份声明的同意。')
+        self.consent_status.setText(self.pending_consent.get('reason','当前官网声明需重新确认，请查看内容。') if active else '两项已勾选；保存后自动处理相同声明。' if saved else '勾选两项并保存，即可提前完成这份声明的同意。')
 
     def open_consent(self):
         self.update_consent_entry()

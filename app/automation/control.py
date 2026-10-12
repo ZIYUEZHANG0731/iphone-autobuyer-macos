@@ -1,10 +1,9 @@
 from __future__ import annotations
 import asyncio
-import fcntl
 import threading
 import time
-from pathlib import Path
-from app.models.flow import Stopped, FlowError
+from app.models.flow import Stopped
+from app.platforms.locking import ProcessLock
 
 class Control:
     def __init__(self, interactive=True, *, site_cooldown=None):
@@ -69,25 +68,3 @@ class Control:
         while not self.resume_event.is_set():
             await self.sleep(.15)
         self.resume_event.clear()
-
-class ProcessLock:
-    def __init__(self, path: Path):
-        self.path = path
-        self.handle = None
-
-    def __enter__(self):
-        self.path.parent.mkdir(parents=True,exist_ok=True)
-        self.handle = self.path.open("a")
-        try:
-            fcntl.flock(self.handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:
-            self.handle.close()
-            self.handle = None
-            raise FlowError("另一个购买任务正在运行，请先停止它") from None
-        self.path.chmod(0o600)
-        return self
-
-    def __exit__(self,*_):
-        if self.handle:
-            fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
-            self.handle.close()

@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import json
 import hashlib
 import ipaddress
-import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -20,6 +19,7 @@ from urllib.parse import urlsplit
 from app.models.config import apple_url
 from app.services.login import apple_auth_url
 from app.services.network_state import read_local_network
+from app.utils.files import write_private_json
 
 
 FAMILY_LABELS = {
@@ -424,16 +424,9 @@ class NetworkDiagnosis:
 
     def save(self):
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            temporary = self.path.with_suffix('.tmp')
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0)
-            with os.fdopen(os.open(temporary, flags, 0o600), 'w', encoding='utf-8') as stream:
-                os.fchmod(stream.fileno(), 0o600)
-                json.dump({'started_at': self.started, 'browser': self.kind, 'runtime': self.runtime,
-                           'page_samples': self.page_samples, 'health': self.health,
-                           'network_samples': list(self.network_samples),
-                           'events': list(self.events)}, stream, ensure_ascii=False, indent=2)
-            temporary.replace(self.path)
+            write_private_json(self.path, {'started_at': self.started, 'browser': self.kind, 'runtime': self.runtime,
+                'page_samples': self.page_samples, 'health': self.health,
+                'network_samples': list(self.network_samples), 'events': list(self.events)})
         except OSError:
             pass
 

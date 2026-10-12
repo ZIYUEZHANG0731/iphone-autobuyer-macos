@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from app.models.config import apple_url
 from app.models.flow import FlowError
 from app.utils.paths import resource_path
+from app.platforms import chrome_locations
 
 EXTENSION_ID = 'mmlmfjhmonkocbjadbfplnigmagldckm'
 EXTENSION_URL = f'https://chromewebstore.google.com/detail/playwright-extension/{EXTENSION_ID}'
@@ -16,7 +17,7 @@ EXTENSION_URL = f'https://chromewebstore.google.com/detail/playwright-extension/
 
 def extension_installed(root: Path | None = None) -> bool:
     """Read installation metadata only; never open cookies or credentials."""
-    root = root or Path.home() / 'Library/Application Support/Google/Chrome'
+    root = root or chrome_locations()[1]
     if not root.is_dir():
         return False
     return any((profile / 'Extensions' / EXTENSION_ID).is_dir()
