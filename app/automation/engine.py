@@ -8,7 +8,7 @@ from uuid import uuid4
 from contextlib import nullcontext
 from app.models.config import Settings, Identity, Mode, State, STATE_LABELS, ConfigError
 from app.models.flow import (StateMachine, RunResult, Receipt, FlowError, UserAction, Unavailable,
-                             SubmissionUnknown, Stopped, Availability)
+                             SubmissionUnknown, Stopped, Availability, RateLimited)
 from app.automation.control import Control, ProcessLock
 from app.services.storage import Repository
 from app.utils.scheduling import future_start
@@ -38,7 +38,7 @@ class Engine:
         self.repo.update_run(self.run_id,str(self.mode),str(state),self.message,event['elapsed'])
         self.callback(event)
 
-    async def operation(self,func):
+    async def operation(self,func, *, opening_deadline=None):
         while True:
             self.control.check()
             try:
@@ -53,6 +53,14 @@ class Engine:
                         task.cancel()
                         await asyncio.gather(task,return_exceptions=True)
             except UserAction as exc:
+                # Only a rejected public-entry document GET can retry itself.
+                # Login, bag mutations, checkout and submit never use this path.
+                if isinstance(exc, RateLimited) and exc.retry_opening and opening_deadline is not None:
+                    if time.monotonic() + exc.retry_after >= opening_deadline:
+                        raise FlowError('等待商店开放超时；官网要求的等待尚未结束') from None
+                    self.emit(self.machine.state, f'官网入口暂时返回异常；{exc.retry_after:.1f} 秒后按原会话重试')
+                    await self.control.sleep(exc.retry_after)
+                    continue
                 previous=self.machine.state
                 self.emit(State.PAUSED,str(exc))
                 if not self.control.interactive:
@@ -95,43 +103,48 @@ class Engine:
                     return self.result()
                 if mode==Mode.LIVE and config.starts_at:
                     future_start(config.starts_at)
-                if mode==Mode.LIVE and hasattr(adapter,'check_login'):
+                if mode==Mode.LIVE and config.starts_at and config.checkout_strategy!='guest' and hasattr(adapter,'check_login'):
                     await self.operation(adapter.check_login)
-                await self.operation(lambda:adapter.prepare(config))
+                opening_deadline=time.monotonic()+config.max_wait
+                last_refresh_started=time.monotonic()
+                await self.operation(lambda:adapter.prepare(config), opening_deadline=opening_deadline)
                 if mode==Mode.LIVE and config.starts_at:
                     target=datetime.fromisoformat(config.starts_at).astimezone(timezone.utc)
                     if target>datetime.now(timezone.utc):
                         self.emit(State.WAITING,"浏览器已就绪，按带时区的开售时间等待")
-                        rechecked=False
+                        rechecked=(target-datetime.now(timezone.utc)).total_seconds()<=600
                         while target>datetime.now(timezone.utc):
-                            if not rechecked and (target-datetime.now(timezone.utc)).total_seconds()<=600 and hasattr(adapter,'check_login'):
+                            if not rechecked and (target-datetime.now(timezone.utc)).total_seconds()<=600 and config.checkout_strategy!='guest' and hasattr(adapter,'check_login'):
                                 await self.operation(adapter.check_login)
                                 rechecked=True
                                 self.emit(State.WAITING,'开售前会话检查结束，继续等待；浏览器未重启')
                             await self.control.sleep(min(1,(target-datetime.now(timezone.utc)).total_seconds()))
                         self.emit(State.PREPARING,"已到开售时间，开始检查公开购买页面")
                         if hasattr(adapter,'reload'):
-                            await self.operation(adapter.reload)
+                            last_refresh_started=time.monotonic()
+                            await self.operation(adapter.reload, opening_deadline=time.monotonic()+config.max_wait)
                 deadline=time.monotonic()+config.max_wait
-                delay=max(config.interval,3.0) if mode!=Mode.LOCAL_TEST else config.interval
-                if getattr(adapter,'waiting_for_link',False):delay=max(delay,60.)
-                checks=0
-                while not await self.operation(adapter.is_open):
+                delay=5.0 if mode!=Mode.LOCAL_TEST else config.interval
+                while not await self.operation(adapter.is_open, opening_deadline=deadline):
                     if time.monotonic()>deadline: raise FlowError("等待商店开放超时")
                     if getattr(adapter,'in_queue',False) or getattr(adapter,'navigation_pending',False):
                         notice='官网正在排队，保留当前页面等待放行' if getattr(adapter,'in_queue',False) else '官网正在加载，等待当前请求完成'
                         if self.message!=notice:self.emit(State.STORE_UNAVAILABLE,notice)
                         await self.control.sleep(1)
                         continue
-                    launch_window=mode==Mode.LIVE and config.starts_at and 0<=(datetime.now(timezone.utc)-datetime.fromisoformat(config.starts_at)).total_seconds()<=120
-                    if launch_window:delay=5.
-                    busy_left=max(0,getattr(adapter,'busy_until',0)-asyncio.get_running_loop().time())
-                    delay=max(delay,busy_left,60. if getattr(adapter,'waiting_for_link',False) else 0.)
-                    self.emit(State.STORE_UNAVAILABLE,f"官网未开放或暂时拥堵；{delay:.1f} 秒后检查当前页面，登录会话保留")
-                    await self.control.sleep(delay)
-                    if hasattr(adapter,'reload'): await self.operation(adapter.reload)
-                    checks+=1
-                    delay=min(config.max_interval,delay*1.8+random.uniform(0,.3))
+                    now=time.monotonic()
+                    busy_left=max(0,getattr(adapter,'busy_until',0)-now)
+                    last=getattr(adapter,'refresh_started_at',last_refresh_started)
+                    # Five seconds between starts, including time already spent
+                    # loading. Never interrupt an in-flight request or a queue.
+                    wait=max(0,last+delay-now,busy_left)
+                    if now+wait>=deadline:raise FlowError('等待商店开放超时')
+                    self.emit(State.STORE_UNAVAILABLE,f"官网未开放或暂时拥堵；{wait:.1f} 秒后检查当前页面，登录会话保留")
+                    await self.control.sleep(wait)
+                    if hasattr(adapter,'reload'):
+                        last_refresh_started=time.monotonic()
+                        await self.operation(adapter.reload, opening_deadline=deadline)
+                    if mode==Mode.LOCAL_TEST:delay=min(config.max_interval,delay*1.8+random.uniform(0,.3))
                 self.emit(State.STORE_OPEN,"购买页面可访问；继续验证配置和自提")
                 await self.operation(lambda:adapter.select_product(config))
                 self.emit(State.PRODUCT_SELECTED,"已选择并检查商品配置")

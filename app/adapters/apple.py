@@ -1,13 +1,15 @@
 from __future__ import annotations
 import asyncio
 import json
+import hashlib
 import re
 from datetime import datetime, timedelta, date, timezone
 from email.utils import parsedate_to_datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 from pathlib import Path
+from uuid import uuid4
 from playwright.async_api import Page, Locator, expect, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from app.models.config import Settings, Store, Identity, Mode, apple_url, money
 from app.models.flow import FlowError, UserAction, Unavailable, RateLimited, Availability, Summary, Receipt, SubmissionUnknown
@@ -16,6 +18,13 @@ from app.services.payment import PaymentStore
 from app.services.pricing import quote_key
 from app.services.catalog import exact_product_link,preorder_time
 from app.services.catalog_reader import public_links
+from app.services.consent import matches_saved_notice, NOTICE_VERSION
+from app.services.login import (ACCOUNT_ENTRY, STORE_ENTRY, LOGOUT_LABEL, account_page_url,
+    apple_auth_url, shop_signin_url, store_page_url, session_page_url, show_store_bag,
+    follow_store_account, visible_login_form)
+from app.services.signin import SignInController
+from app.services.stores import StoreDirectory
+from copy import deepcopy
 
 # Extract observable DOM controls, never undocumented order APIs or a SKU table.
 CONTROL_SCRIPT = '''() => {
@@ -39,15 +48,20 @@ class AppleAdapter:
     @property
     def supports_submit(self):
         return self.payment=='招商银行' and self.installment_months==24
-    def __init__(self, page: Page, control: Control, *, mode=Mode.WEBSITE_DRY_RUN, progress=None, public_screenshot: Path|None=None):
+    def __init__(self, page: Page, control: Control, *, mode=Mode.WEBSITE_DRY_RUN, progress=None, public_screenshot: Path|None=None, page_factory=None, page_closer=None, login_config=None, credential_provider=None, sign_in=None, page_focus=None):
         self.page = page
         self.control = control
         self.mode = mode
         self.progress = progress or (lambda *_: None)
         self.http_status = 200
+        self.opening_retry = False
+        self.response_episode = uuid4().hex
+        self.last_document_status = 200
         self.limited_until = 0.0
         self.selected = None
         self.privacy_seen = False
+        self.privacy_config = None
+        self.preconsent_used = False
         self.identity_filled = False
         self.payment = ""
         self.installment_months = 0
@@ -64,6 +78,15 @@ class AppleAdapter:
         self.waiting_for_link=False
         self.busy_until=0.;self.in_queue=False;self.navigation_pending=False;self.navigation_started=0.
         self.dom_ready=None
+        self.page_factory=page_factory
+        self.page_closer=page_closer or (lambda page:page.close())
+        self.store_directory=StoreDirectory()
+        self.stock_region=None
+        self.guest_attempted=False
+        self.login_config=login_config
+        self.credential_provider=credential_provider
+        self.sign_in=sign_in or SignInController()
+        self.page_focus=page_focus
         self.page.on("response", self._response)
         self.page.on('domcontentloaded',self._dom_loaded)
 
@@ -75,28 +98,48 @@ class AppleAdapter:
         self.page.remove_listener('domcontentloaded',self._dom_loaded)
 
     def bind_page(self,page):
-        self.detach();self.page=page;self.dom_ready=None
+        self.detach();self.page=page;self.dom_ready=None;self.last_document_status=200
         page.on('response',self._response);page.on('domcontentloaded',self._dom_loaded)
 
     def _response(self,response):
-        if not apple_url(response.url):
+        auth_response=apple_auth_url(response.url)
+        if not apple_url(response.url) and not auth_response:
             return
+        path=urlsplit(response.url).path
+        if (response.status < 400 and (auth_response or shop_signin_url(response.url))
+                and (response.request.resource_type=='document' or path.endswith('/signin/complete'))):
+            self.auth_service_status=None
         if response.request.resource_type=='document' and getattr(response.request,'frame',None) is getattr(self.page,'main_frame',None):
             self.dom_ready=False;self.navigation_started=asyncio.get_running_loop().time()
+            self.response_episode=uuid4().hex
+            self.last_document_status=response.status
         if response.status==503:
+            path=urlsplit(response.url).path
+            resource_type=response.request.resource_type
+            shop_request=(path.startswith('/shop/') and resource_type in {'document','xhr','fetch'})
+            if not (auth_response or shop_request):
+                self.progress('http_status',{'status':503,'resource_type':resource_type,'blocks_checkout':False,
+                    'wait_seconds':0,'context':'resource','affects':'resource'})
+                return
             retry=response.headers.get('retry-after','');wait=0
             try:wait=int(retry) if retry.isdigit() else max(0,int((parsedate_to_datetime(retry)-datetime.now(timezone.utc)).total_seconds())) if retry else 0
             except (ValueError,TypeError,OverflowError):pass
             if wait and self.control.site_cooldown:wait=self.control.site_cooldown.busy(wait)
             self.busy_until=max(self.busy_until,asyncio.get_running_loop().time()+wait)
-            self.progress('http_status',{'status':503,'resource_type':response.request.resource_type,'blocks_checkout':False,'wait_seconds':wait,'context':'shop','affects':'store_busy'})
+            login_failure=auth_response or shop_signin_url(response.url)
+            self.progress('http_status',{'status':503,'resource_type':response.request.resource_type,'blocks_checkout':False,'wait_seconds':wait,
+                'context':'login' if login_failure else 'shop','affects':'login_service' if login_failure else 'store_busy'})
+            if login_failure:
+                self.auth_service_status=503
+                self.progress('login',{'authenticated':None,'status':'service_unavailable','checked_at':datetime.now(timezone.utc).isoformat(),
+                    'reason':'Apple 认证请求返回 HTTP 503；这是服务请求失败，不能据此判断密码错误。保留会话，不自动重发密码'})
             return
         if response.status in (403,429,541):
             resource_type=response.request.resource_type
             path=urlsplit(response.url).path
             purchase_request='/shop/' in path
-            context='login' if path.startswith('/shop/signIn/') else 'account' if path.startswith('/shop/account/') else 'shop'
-            blocking=response.status in (429,503) or resource_type in {'document','script','stylesheet'} or (resource_type in {'xhr','fetch'} and purchase_request)
+            context='login' if auth_response or shop_signin_url(response.url) else 'account' if account_page_url(response.url) else 'shop'
+            blocking=response.status in (429,503) or resource_type in {'document','script','stylesheet'} or (resource_type in {'xhr','fetch'} and (purchase_request or auth_response))
             # This public product-page GET supplies a delivery estimate. The
             # observed pickup modal makes its own independent request. A failed
             # delivery estimate must not masquerade as failed pickup inventory.
@@ -109,17 +152,20 @@ class AppleAdapter:
             if delivery_preview:
                 blocking=False
                 self.delivery_preview_failed=True
-            wait=300 if blocking else 0
+            wait=5 if blocking else 0
             retry=response.headers.get('retry-after','')
             if retry:
                 try:
                     wait=max(wait,int(retry)) if retry.isdigit() else max(wait,int((parsedate_to_datetime(retry)-datetime.now(timezone.utc)).total_seconds()))
                 except (ValueError,TypeError,OverflowError):pass
-            if blocking and self.control.site_cooldown:wait=self.control.site_cooldown.block(wait)
+            if blocking and self.control.site_cooldown:wait=self.control.site_cooldown.block(wait,episode=self.response_episode)
             self.progress('http_status',{'status':response.status,'resource_type':resource_type,'blocks_checkout':blocking,'wait_seconds':wait if blocking else 0,'context':context,
                                         'affects':'delivery_preview' if delivery_preview else context})
             if blocking:
                 self.http_status=response.status
+                self.opening_retry=(resource_type=='document' and getattr(response.request,'method','')=='GET'
+                                    and path.startswith('/shop/buy-iphone') and context=='shop'
+                                    and not self.add_attempted and not self.cart_checked and not self.submit_attempted)
                 self.limited_until=max(self.limited_until,asyncio.get_running_loop().time()+wait)
                 if context in ('login','account'):
                     self.progress('login',{'authenticated':None,'checked_at':datetime.now(timezone.utc).isoformat(),
@@ -131,54 +177,200 @@ class AppleAdapter:
 
     async def guard(self,page=None,*,allow_uncommitted=False,allow_busy=False):
         self.control.check()
+        if getattr(self,'auth_service_status',None):
+            raise UserAction('Apple 认证请求返回 HTTP 503，暂时无法验证身份；保留当前页面，不自动重发密码')
         page=page or self.page
         browser_error=page.url=='chrome-error://chromewebdata/' and self.browse_connection_failed
         uncommitted=allow_uncommitted and (page.url=='about:blank' or browser_error) and apple_url(self.target_url)
         if not uncommitted:self.origin(page)
-        if self.http_status in (403,429,541,503):
-            if asyncio.get_running_loop().time() < self.limited_until:
-                remaining=int(self.limited_until-asyncio.get_running_loop().time())+1
-                raise RateLimited(f"官网关键请求返回 HTTP {self.http_status}；至少等待 {remaining} 秒，处理官网提示后点“继续检查”")
-            self.http_status = 200
-        if not allow_busy and asyncio.get_running_loop().time()<self.busy_until:
-            raise UserAction(f'官网暂时繁忙，请等待 {int(self.busy_until-asyncio.get_running_loop().time())+1} 秒后继续；已有操作不重复提交')
-        # Read visible page text in memory only; never log a DOM dump with identities.
+        # A visible challenge/refusal still requires user action. Never use a
+        # transient HTTP retry to skip it or to resubmit login/checkout forms.
         text = await page.locator("body").inner_text()
         if re.search(r"captcha|验证码.{0,8}(图片|字符)|verify you are human|access denied|访问被拒绝",text,re.I):
             raise UserAction("官网要求安全验证，请在浏览器手动处理后继续")
+        if self.http_status in (403,429,541,503):
+            if asyncio.get_running_loop().time() < self.limited_until:
+                remaining=int(self.limited_until-asyncio.get_running_loop().time())+1
+                raise RateLimited(f"官网关键请求返回 HTTP {self.http_status}；至少等待 {remaining} 秒，处理官网提示后点“继续检查”",
+                                  retry_after=remaining,retry_opening=self.opening_retry)
+            self.http_status = 200
+            self.opening_retry = False
+        if not allow_busy and asyncio.get_running_loop().time()<self.busy_until:
+            raise UserAction(f'官网暂时繁忙，请等待 {int(self.busy_until-asyncio.get_running_loop().time())+1} 秒后继续；已有操作不重复提交')
+        # Read visible page text in memory only; never log a DOM dump with identities.
         # These legal consent controls are observed on Apple's actual checkout.
-        if await page.get_by_role("button",name="同意并继续",exact=True).is_visible():
-            if not self.privacy_seen:
-                self.privacy_seen=True;self.progress('consent_required',{'title':'Apple 数据隐私知情同意书'})
-            raise UserAction("Apple 要求签署数据隐私知情同意书，请在浏览器自行确认后点“继续检查”")
+        consent=page.get_by_role("button",name="同意并继续",exact=True)
+        if await consent.is_visible():
+            snapshot=await self.consent_snapshot(page,text)
+            if not snapshot:self.control.consume_consent('')
+            checkout=urlsplit(page.url).path.rstrip('/')=='/shop/checkout'
+            saved_choice=bool(snapshot and checkout and not self.preconsent_used and matches_saved_notice(snapshot,self.privacy_config))
+            current_choice=bool(snapshot and self.control.consume_consent(snapshot['key']))
+            if saved_choice or current_choice:
+                if saved_choice:self.preconsent_used=True
+                boxes=page.get_by_role('checkbox').filter(visible=True)
+                try:
+                    for box in await boxes.all():await box.check()
+                    await consent.click()
+                    await consent.wait_for(state='hidden',timeout=15000)
+                except PlaywrightError:
+                    self.privacy_seen=False
+                    raise UserAction('本次隐私确认已尝试，官网尚未完成；请查看当前页面，不会重复确认') from None
+                self.privacy_seen=False
+                self.progress('consent_completed',{'title':'Apple 数据隐私知情同意书',
+                                                  'source':'saved' if saved_choice else 'current',
+                                                  'notice_version':NOTICE_VERSION if saved_choice else ''})
+                return
+            key=snapshot['key'] if snapshot else True
+            if self.privacy_seen != key:
+                self.privacy_seen=key
+                self.progress('consent_required',snapshot or {'title':'Apple 数据隐私知情同意书'})
+            raise UserAction("Apple 要求签署数据隐私知情同意书，请在软件中选择本次确认，或在浏览器处理后点“继续检查”")
         self.privacy_seen=False
 
-    async def confirm_login(self,page=None,*,timeout=15):
+    async def consent_snapshot(self,page,text):
+        """Only offer the two observed Apple China choices; unknown terms stay manual."""
+        heading=re.search(r'Apple\s*和你的数据隐私',text)
+        if not heading:return None
+        labels=await page.get_by_role('checkbox').filter(visible=True).evaluate_all('''els=>els.map(e=>
+          (Array.from(e.labels||[]).map(l=>l.innerText).join(' ') || e.getAttribute('aria-label') || '').replace(/\\s+/g,' ').trim())''')
+        if len(labels)!=2 or not re.search(r'^我同意\s*Apple.*隐私政策',labels[0],re.I) or not re.search(r'^我了解.*中国境外.*存储和处理',labels[1]):return None
+        legal=text[heading.start():]
+        choice=re.search(r'我同意\s*Apple',legal,re.I)
+        if not choice or choice.start()>2000:return None
+        details=legal[:choice.start()].strip()
+        # Read the visible notice's common container, including text below its
+        # button. A new paragraph there must also invalidate a saved choice.
+        notice_text=await page.get_by_role('button',name='同意并继续',exact=True).evaluate('''button=>{
+          for(let root=button.parentElement;root;root=root.parentElement){
+            const visibleBoxes=Array.from(root.querySelectorAll('input[type="checkbox"]')).filter(e=>
+              e.getClientRects().length && getComputedStyle(e).visibility!=='hidden');
+            if(visibleBoxes.length===2 && /Apple\\s*和你的数据隐私/.test(root.innerText)) return root.innerText;
+          }
+          return '';
+        }''')
+        notice_heading=re.search(r'Apple\s*和你的数据隐私',notice_text)
+        if notice_heading:notice_text=notice_text[notice_heading.start():]
+        notice_text=notice_text.replace('不同意并继续购物','').replace('同意并继续','').strip()
+        # Private URL/body are hashed in memory only, never emitted or saved.
+        key=hashlib.sha256(json.dumps([page.url,text,labels],ensure_ascii=False).encode()).hexdigest()
+        return {'title':'Apple 数据隐私知情同意书','key':key,'details':details,'choices':labels,'notice_text':notice_text,
+                'scope':urlsplit(page.url).hostname}
+
+    async def open_store_signin(self, page=None):
+        page=page or self.page
+        if not store_page_url(page.url):
+            await page.goto(STORE_ENTRY,wait_until='domcontentloaded',timeout=15000)
+        await self.guard(page)
+        try:
+            menu=await show_store_bag(page)
+        except PlaywrightError:
+            await self.guard(page)
+            raise UserAction('商店购物袋菜单尚未载入；保留页面，请从购物袋的“登录”入口继续') from None
+        login=menu.get_by_role('link',name=re.compile(r'^(登录|登入|Sign In|Log In)$',re.I)).filter(visible=True)
+        deadline=asyncio.get_running_loop().time()+8
+        while True:
+            await self.guard(page)
+            if await menu.get_by_role('link',name=LOGOUT_LABEL).filter(visible=True).count():
+                self.progress('login',{'authenticated':None,'status':'remembered',
+                    'reason':'购物袋记住了账户，正在通过官网账户入口复核有效登录'})
+                await follow_store_account(page,menu)
+                await self.login_guard(page)
+                return
+            count=await login.count()
+            if count>1:raise UserAction('购物袋显示多个登录入口，请在官网自行选择')
+            if count==1:
+                href=await login.get_attribute('href')
+                if not href or not shop_signin_url(urljoin(page.url,href)):
+                    raise UserAction('购物袋登录链接无法确认；请在官网手动打开登录页')
+                # The website owns the destination, SSI and redirect context.
+                # Click the actual menu link; do not persist or replay its URL.
+                await login.click(timeout=5000)
+                await page.wait_for_load_state('domcontentloaded',timeout=15000)
+                await self.login_guard(page)
+                return
+            if asyncio.get_running_loop().time()>=deadline:
+                raise UserAction('购物袋尚未显示登录入口；保留商店页面，请稍后继续')
+            await self.control.sleep(.15)
+
+    async def login_status(self,page=None,*,timeout=3):
         # Observe the current login return; do not submit credentials or retry it.
         page=page or self.page
         deadline=asyncio.get_running_loop().time()+timeout
-        logout=page.get_by_role('link',name=re.compile(r'注销|退出登录')).filter(visible=True)
+        logout=page.get_by_role('link',name=LOGOUT_LABEL).filter(visible=True)
+        bag_checked=False
         while True:
-            await self.guard(page)
-            if '/shop/account/' in urlsplit(page.url).path and await logout.count():
-                self.progress('login',{'authenticated':True,'checked_at':datetime.now(timezone.utc).isoformat()})
+            if getattr(self,'auth_service_status',None):
+                raise UserAction('Apple 认证请求返回 HTTP 503，暂时无法验证身份；这不等于密码错误，保留当前页面')
+            if apple_auth_url(page.url):
+                self.control.check()
+                if self.http_status in (403,429,541) and asyncio.get_running_loop().time()<self.limited_until:
+                    raise RateLimited('Apple 登录请求暂时被拒绝；保留会话，等待官网允许后再处理',retry_after=max(1,int(self.limited_until-asyncio.get_running_loop().time())))
+            else:await self.guard(page,allow_busy=True)
+            if store_page_url(page.url) and not bag_checked and not await logout.count():
+                bag_checked=True
+                try:
+                    if await follow_store_account(page):continue
+                except PlaywrightError:pass
+            elif store_page_url(page.url) and not bag_checked:
+                bag_checked=True
+                if await follow_store_account(page):continue
+            if session_page_url(page.url) and await logout.count():
+                self.progress('login',{'authenticated':True,'status':'authenticated','checked_at':datetime.now(timezone.utc).isoformat()})
                 return True
+            if await visible_login_form(page):
+                self.progress('login',{'authenticated':False,'status':'sign_in_required','checked_at':datetime.now(timezone.utc).isoformat(),
+                    'reason':'官网显示登录表单；按提前选择的结账策略处理，现有会话保留'})
+                return False
             remaining=deadline-asyncio.get_running_loop().time()
             if remaining<=0:
                 break
             await self.control.sleep(min(.2,remaining))
         body=await page.locator('body').inner_text()
         loading=bool(re.search(r'正在载入|正在加载|Loading',body,re.I))
-        reason='官网登录返回仍在加载，暂时无法确认；现有会话保留' if loading else '官网尚未显示已登录账户，请完成页面提示与验证；现有会话保留'
-        self.progress('login',{'authenticated':None if loading else False,'checked_at':datetime.now(timezone.utc).isoformat(),'reason':reason})
-        raise UserAction(reason)
+        reason='官网登录返回仍在加载，暂时无法确认；现有会话保留' if loading else '官网暂未提供明确登录结果；保留会话，结账时再确认'
+        self.progress('login',{'authenticated':None,'status':'unknown','checked_at':datetime.now(timezone.utc).isoformat(),'reason':reason})
+        return None
+
+    async def login_guard(self,page):
+        if getattr(self,'auth_service_status',None):
+            raise UserAction('Apple 认证请求返回 HTTP 503；保留页面，不自动重发密码')
+        if not apple_auth_url(page.url):
+            await self.guard(page,allow_busy=True)
+        else:
+            self.control.check()
+            if self.http_status in (403,429,541) and asyncio.get_running_loop().time()<self.limited_until:
+                raise RateLimited('Apple 登录请求暂时被拒绝；保留会话，不会重新提交密码',retry_after=max(1,int(self.limited_until-asyncio.get_running_loop().time())))
+        if self.last_document_status>=400 or asyncio.get_running_loop().time()<self.busy_until:
+            raise UserAction('官网登录暂未返回成功页面；保留会话，不会提交密码')
+
+    async def auto_sign_in(self,page,config=None):
+        config=config or self.login_config
+        if not config:return False
+        return await self.sign_in.run(page,config,provider=self.credential_provider,
+            guard=lambda:self.login_guard(page),control=self.control,progress=self.progress,
+            timeout=min(30,config.operation_timeout))
+
+    async def focus_login(self,page):
+        if self.page_focus:await self.page_focus(page)
+        else:await page.bring_to_front()
+        self.progress('auth_focus',True)
+
+    async def confirm_login(self,page=None,*,timeout=15):
+        result=await self.login_status(page,timeout=timeout)
+        if result is not True:
+            body=await (page or self.page).locator('body').inner_text()
+            reason=('官网登录返回仍在加载，暂时无法确认；现有会话保留' if re.search(r'正在载入|正在加载|Loading',body,re.I) else '官网暂未提供明确登录结果；请查看当前页面后继续') if result is None else '官网需要重新登录或验证，请在浏览器处理后继续'
+            raise UserAction(reason)
+        return True
 
     async def prepare(self,config):
         config.validate(self.mode)
+        self.privacy_config=config
         self.discovery_product=config.product
         self.waiting_for_link=not config.product.url and config.product.discover_from_store
         self.target_url=config.product.url or 'https://www.apple.com.cn/shop/buy-iphone'
-        self.navigation_started=asyncio.get_running_loop().time()
+        self.navigation_started=self.refresh_started_at=asyncio.get_running_loop().time()
         self.dom_ready=False
         # A stalled deferred resource must not consume the browser's 30s default
         # on every public-store opening check. Checkout navigation is unchanged.
@@ -198,29 +390,53 @@ class AppleAdapter:
 
     async def check_login(self):
         # One normal account-page check before a real scheduled run. No cookie export.
-        account=await self.page.context.new_page()
+        pending=self.sign_in.pending_page
+        account=pending if pending and not pending.is_closed() else await self.new_page()
+        keep=bool(pending and account is pending)
         account.on('response',self._response)
         try:
             try:
-                response=await account.goto('https://secure.www.apple.com.cn/shop/account/home',wait_until='domcontentloaded')
+                response=None if keep else await account.goto(ACCOUNT_ENTRY,wait_until='domcontentloaded',timeout=5000)
             except PlaywrightError:
                 self.progress('login',{'authenticated':None,'checked_at':datetime.now(timezone.utc).isoformat(),'reason':'账户页暂时无法连接；沿用现有会话，结账时再检查'})
-                return False
-            await self.guard(account,allow_busy=True)
+                return None
+            if not apple_auth_url(account.url):await self.guard(account,allow_busy=True)
             text=await account.locator('body').inner_text()
             if (response and response.status==503) or re.search(r'马上回来|稍后回来|We.?ll be back|商店.{0,8}(维护|暂时关闭)',text,re.I):
                 self.progress('login',{'authenticated':None,'checked_at':datetime.now(timezone.utc).isoformat(),'reason':'官网维护，暂时无法复核登录；浏览器会话保留'})
-                return False
-            return await self.confirm_login(account)
+                return None
+            status=await self.login_status(account)
+            config=self.login_config
+            if status is True:
+                if config:self.sign_in.authenticated(config.credential_id)
+                keep=False
+            elif status is False and config and config.auto_login:
+                try:
+                    if not keep:await self.open_store_signin(account)
+                    attempted=await self.auto_sign_in(account,config)
+                    if attempted:
+                        status=await self.login_status(account)
+                        keep=False
+                except UserAction:
+                    keep=True;self.sign_in.pending_page=account
+                    await self.focus_login(account)
+                    raise
+            return status
         finally:
             account.remove_listener('response',self._response)
-            await account.close()
+            if not keep and account is not self.page:await self.page_closer(account)
+
+    async def new_page(self):
+        return await (self.page_factory() if self.page_factory else self.page.context.new_page())
 
     async def is_open(self):
         # Rejections may arrive while a navigation is timing out. Check them
         # before treating the timeout as permission for another refresh.
         await self.guard(allow_uncommitted=self.browse_unavailable,allow_busy=True)
         self.navigation_pending=False
+        # An error page can contain an H1. Expiry of its retry delay does not
+        # turn that failed document into a successful storefront response.
+        if self.last_document_status>=400:return False
         if apple_url(self.page.url):
             ready=await self.page.evaluate('document.readyState')
             self.navigation_pending=(ready=='loading' or self.dom_ready is False) and asyncio.get_running_loop().time()-self.navigation_started<20
@@ -257,7 +473,7 @@ class AppleAdapter:
     async def reload(self):
         await self.guard(allow_uncommitted=self.browse_unavailable,allow_busy=True)
         if self.in_queue or self.navigation_pending or asyncio.get_running_loop().time()<self.busy_until:return
-        self.navigation_started=asyncio.get_running_loop().time()
+        self.navigation_started=self.refresh_started_at=asyncio.get_running_loop().time()
         self.dom_ready=False
         try:
             if apple_url(self.page.url):
@@ -426,14 +642,34 @@ class AppleAdapter:
 
     async def availability(self,config):
         try:
-            return await self._read_availability(config)
+            # One normal location query per selected city, not per shop and
+            # never per nationwide directory entry. Stop at the first city
+            # with an acceptable selection to keep the priority path short.
+            cities={}
+            for store in config.stores:
+                if store.enabled:
+                    enriched=self.store_directory.enrich(store)
+                    cities.setdefault((enriched.province,enriched.city),[]).append(enriched)
+            result=[];groups=list(cities.values());preferred=[self.store_directory.enrich(s) for s in config.stores if s.enabled]
+            for city_index,stores in enumerate(groups):
+                region_config=deepcopy(config);region_config.stores=stores
+                states=await self._read_availability(region_config,publish=False)
+                result.extend(a for a in states if a.store.store_id not in {s.store.store_id for s in result})
+                acceptable=lambda a: a.available and (not (config.pickup_from or config.pickup_to) or bool(a.pickup_date)) and (not config.pickup_from or a.pickup_date>=config.pickup_from) and (not config.pickup_to or a.pickup_date<=config.pickup_to)
+                selected_indices=[index for index,s in enumerate(preferred) if any(acceptable(a) and (s.store_id==a.store.store_id or (not s.store_id and s.name==a.store.name)) for a in result)]
+                unqueried={(s.province,s.city) for group in groups[city_index+1:] for s in group}
+                pending_indices=[index for index,s in enumerate(preferred) if (s.province,s.city) in unqueried]
+                if selected_indices and (not pending_indices or min(selected_indices)<min(pending_indices)):break
+            self.cached_availability=result
+            self.progress('stores',[{'name':a.store.name,'store_id':a.store.store_id,'city':a.store.city,'province':a.store.province,'district':a.store.district,'available':a.available,'quote':a.quote} for a in result])
+            return result
         except PlaywrightError:
             # A rejection can arrive while the modal is still opening. Preserve
             # its actual rate-limit reason instead of reporting a generic timeout.
             await self.guard()
             raise UserAction('官网供货页面尚未加载完成，检测时间未更新；请查看浏览器提示后继续') from None
 
-    async def _read_availability(self,config):
+    async def _read_availability(self,config,*,publish=True):
         query_started=asyncio.get_running_loop().time()
         await self.guard()
         if self.cart_checked:
@@ -496,12 +732,12 @@ class AppleAdapter:
                 if match:
                     try: when=date(today.year,int(match[1]),int(match[2])).isoformat()
                     except ValueError: pass
-            store=Store(name=lines[0],city=lines[1].split(',')[0] if len(lines)>1 else '',store_id=c['id'])
+            store=self.store_directory.enrich(Store(name=lines[0],city=lines[1].split(',')[0] if len(lines)>1 else '',store_id=c['id']))
             result.append(Availability(store,available,quote,when))
         self.cached_availability=result
         self.progress('stock_query',{'completed_at':datetime.now(timezone.utc).isoformat(),
             'elapsed':round(asyncio.get_running_loop().time()-query_started,2),'store_count':len(result)})
-        self.progress('stores',[{'name':a.store.name,'store_id':a.store.store_id,'city':a.store.city,'available':a.available,'quote':a.quote} for a in result])
+        if publish:self.progress('stores',[{'name':a.store.name,'store_id':a.store.store_id,'city':a.store.city,'province':a.store.province,'district':a.store.district,'available':a.available,'quote':a.quote} for a in result])
         return result
 
     async def _refresh_stock_region(self,dialog,config):
@@ -510,7 +746,7 @@ class AppleAdapter:
         location=dialog.locator('button[aria-expanded]').filter(visible=True)
         if await location.count()!=1:
             raise UserAction('官网区域查询控件无法确认，库存检测时间未更新；请在浏览器核对')
-        store=next(s for s in config.stores if s.enabled)
+        store=self.store_directory.enrich(next(s for s in config.stores if s.enabled))
         if not store.district:
             raise UserAction('当前官网区域查询需要明确区县，请完善首选门店的区县后再检查')
         try:
@@ -545,6 +781,7 @@ class AppleAdapter:
             if not response or not 200<=response.status<300:
                 raise UserAction('官网区域查询未成功，未把原有结果记作新库存；请查看浏览器提示')
             await expect(location).to_have_attribute('aria-expanded','false')
+            self.stock_region=(store.province,store.city)
         except PlaywrightError:
             await self.guard()
             raise UserAction('官网尚未返回可确认的新供货结果，检测时间未更新；请处理浏览器提示后继续') from None
@@ -553,6 +790,15 @@ class AppleAdapter:
         await self.guard()
         if self.cart_checked:
             return
+        selected_store=self.store_directory.enrich(availability.store)
+        if self.stock_region and self.stock_region!=(selected_store.province,selected_store.city):
+            selected_config=deepcopy(config);selected_config.stores=[selected_store]
+            latest=await self._read_availability(selected_config,publish=False)
+            current=next((a for a in latest if a.store.store_id==selected_store.store_id and a.available),None)
+            if not current:raise UserAction('目标门店的最新供货已变化；请重新检查门店，不会按旧库存进入结账')
+            if (config.pickup_from and (not current.pickup_date or current.pickup_date<config.pickup_from)) or (config.pickup_to and (not current.pickup_date or current.pickup_date>config.pickup_to)):
+                raise UserAction('目标门店的最新取货日期不符合设置；请重新检查门店')
+            availability=current
         dialog=self.page.get_by_role('dialog')
         if await dialog.is_visible():
             await self._check_radio(dialog.get_by_role('radio',name=re.compile(re.escape(availability.store.name))))
@@ -560,15 +806,29 @@ class AppleAdapter:
         self.selected=availability
         if not self.add_attempted:
             # Never merge a task into unrelated items or repeat a click of unknown result.
-            bag = await self.page.context.new_page()
+            bag = await self.new_page()
+            bag.on('response',self._response)
             try:
                 await bag.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+                await self.guard(bag)
                 await bag.get_by_role('heading',level=1).wait_for()
                 existing=bag.get_by_role('button',name=re.compile(r'^移除 '))
                 if await existing.count():
+                    if self.mode==Mode.WEBSITE_DRY_RUN:
+                        # A restarted trial may retain its previous item. Adopt
+                        # only a fully matched bag, without adding/removing items
+                        # or changing quantity. A live purchase still stays manual.
+                        await self._validate_bag(config,bag)
+                        self.add_attempted=True
+                        await self.page.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+                        await self.guard()
+                        await self._validate_bag(config)
+                        self.cart_checked=True
+                        return
                     raise UserAction("该浏览器购物袋已有商品，请手动核对或移除后再继续；软件不自动清空购物袋")
             finally:
-                await bag.close()
+                bag.remove_listener('response',self._response)
+                await self.page_closer(bag)
             self.add_attempted=True
             try:
                 await self.page.get_by_role('button',name='添加到购物袋',exact=True).click()
@@ -597,17 +857,27 @@ class AppleAdapter:
             await self.page.screenshot(path=str(self.public_screenshot))
             self.public_screenshot.chmod(0o600)
 
-    async def _validate_bag(self,config):
-        title=await self.page.get_by_role('heading',level=1).inner_text()
+    async def _validate_bag(self,config,page=None):
+        page=page or self.page
+        title=await page.get_by_role('heading',level=1).inner_text()
         match=re.search(r'总计\s*RMB\s*([\d,]+(?:\.\d+)?)',title)
         if not match or money(match[1])<=0:
             raise FlowError("购物袋总金额超出授权或无法确认")
-        headings=self.page.get_by_role('heading',level=2)
+        headings=page.get_by_role('heading',level=2)
         texts=await headings.all_text_contents()
         normalized=lambda s:re.sub(r'\s+','',s).lower()
-        matching=[s for s in texts if normalized(config.product.name) in normalized(s)]
-        if len(matching)!=1 or await self.page.get_by_role('button',name=re.compile(r'^移除 ')).count()!=1:
+        model=normalized(config.product.name)
+        def matches(s):
+            value=normalized(s)
+            suffix=value[len(model):]
+            # iPhone 17e/Pro and Pro Max cannot match their shorter model names.
+            return value.startswith(model) and not (suffix and suffix[0].isascii() and suffix[0].isalpha())
+        matching=[s for s in texts if matches(s)]
+        if len(matching)!=1 or await page.get_by_role('button',name=re.compile(r'^移除 ')).count()!=1:
             raise FlowError("购物袋含非目标商品或商品无法确认")
+        quantities=page.get_by_role('combobox',name='数量',exact=True)
+        if await quantities.count()!=1 or await quantities.input_value()!=str(config.product.quantity):
+            raise FlowError('购物袋数量与购买设置不一致')
         # Semantic bag line must still contain the selected human-readable labels.
         for c in await self.options_for_bag(config):
             if normalized(c) not in normalized(matching[0]):
@@ -627,16 +897,30 @@ class AppleAdapter:
         return result
 
     async def fill_customer(self,identity,config):
-        await self.guard()
+        if not apple_auth_url(self.page.url):await self.guard()
+        else:await self.login_guard(self.page)
         if await self.page.get_by_role('button',name='结账',exact=True).count():
             await self._validate_bag(config)
             await self.page.get_by_role('button',name='结账',exact=True).first.click()
-            await self._wait_any(['以游客身份继续','继续填写取货详情','继续选择付款方式'])
+            await self._wait_checkout_entry()
+        if config.checkout_strategy!='guest' and config.auto_login:
+            # Credentials take priority over the explicitly selected guest backup.
+            # A rejected/uncertain attempt pauses with the bag intact.
+            await self.auto_sign_in(self.page,config)
         guest=self.page.get_by_role('button',name='以游客身份继续',exact=True)
         if await guest.is_visible():
+            if config.checkout_strategy=='account_only':
+                raise UserAction('官网要求重新登录；已设置“只用 Apple 账户”，请完成登录后继续。购物袋保留')
+            if self.guest_attempted:
+                raise UserAction('游客继续已尝试，官网尚未完成跳转；请查看当前页面，不会反复点击')
+            self.guest_attempted=True
             await guest.click()
+            self.progress('checkout_auth',{'path':'guest','strategy':config.checkout_strategy,
+                'message':'官网要求登录，已按预选策略进入游客结账；若官网要求手机验证码则暂停'})
             await self._wait_any(['同意并继续','继续填写取货详情','继续选择付款方式'])
             await self.guard()
+        elif await visible_login_form(self.page):
+            raise UserAction('官网需要登录且当前未显示游客入口；请完成登录，不会反复提交账户密码')
         await self.guard()
         pickup=self.page.get_by_role('radio',name='我要取货',exact=True)
         if await pickup.is_visible():
@@ -653,6 +937,7 @@ class AppleAdapter:
         if await self.page.get_by_role('button',name='继续选择付款方式',exact=True).is_visible():
             await self.inspect_customer_fields()
             if self.identity_filled:
+                await self.check_customer_verification()
                 return
             if identity is None or not config.transmit_identity:
                 raise UserAction("已到官网取货人表单：需填写真实姓名、联系方式、证件后四位并完成手机验证；请在 GUI 的 Keychain 取货人中设置并授权填写，或在浏览器手动填写后继续")
@@ -672,13 +957,33 @@ class AppleAdapter:
             self.identity_filled=True
             # Some guest flows require SMS; the logged-in flow observed on 2026-10-11
             # accepted these fields directly. Pause only for an actual visible verifier.
-            verify=self.page.get_by_role('button',name='验证',exact=True)
-            if await verify.is_visible():
-                raise UserAction("已填写并读回取货人字段；官网要求手机验证，请自行点“验证”、输入验证码后点“继续检查”")
+            await self.check_customer_verification()
             return
         # Manually completed contact can already have advanced to Payment.
         if not re.search(r'Payment|Billing',self.page.url) and not await self.page.get_by_role('heading',name=re.compile('付款|支付')).count():
             raise UserAction("当前结账阶段无法确认，请在浏览器处理登录或提示后继续")
+
+    async def check_customer_verification(self):
+        verify=self.page.get_by_role('button',name='验证',exact=True).filter(visible=True)
+        codes=self.page.locator('input[autocomplete="one-time-code"]').filter(visible=True)
+        if await verify.count() or await codes.count():
+            self.progress('verification_required',{'kind':'phone','message':'官网要求手机验证码；已填资料并保留购物袋，请在官网完成验证后继续'})
+            raise UserAction('已填写并读回取货人字段；官网要求手机验证，请自行点“验证”、输入验证码后点“继续检查”')
+
+    async def _wait_checkout_entry(self,timeout=30):
+        deadline=asyncio.get_running_loop().time()+timeout
+        names=['以游客身份继续','同意并继续','继续填写取货详情','继续选择付款方式']
+        while asyncio.get_running_loop().time()<deadline:
+            self.control.check()
+            for name in names:
+                if await self.page.get_by_role('button',name=name,exact=True).is_visible():return
+            if await visible_login_form(self.page):
+                # Give the normally rendered guest button one bounded moment
+                # to appear without waiting on a login that needs user input.
+                await self.control.sleep(.5)
+                return
+            await self.control.sleep(.1)
+        raise UserAction('官网结账尚未完成加载，当前购物袋保留，请查看页面后继续')
 
     async def inspect_customer_fields(self):
         labels=await self.page.get_by_role('textbox').evaluate_all('els=>els.map(e=>e.getAttribute("aria-label") || Array.from(e.labels||[]).map(l=>l.innerText).join(" "))')

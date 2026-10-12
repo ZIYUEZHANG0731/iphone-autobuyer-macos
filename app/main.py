@@ -21,6 +21,7 @@ def parser():
     p.add_argument('--headless',action='store_true')
     p.add_argument('--report',type=Path)
     p.add_argument('--smoke-test',action='store_true')
+    p.add_argument('--embedded-smoke-test',action='store_true',help='内嵌浏览器离线启动与正常退出检查')
     p.add_argument('--screenshot',type=Path)
     p.add_argument('--install-browser',action='store_true')
     return p
@@ -93,20 +94,54 @@ def main():
             args.report.write_text(json.dumps([result],ensure_ascii=False,indent=2),encoding='utf-8')
             args.report.chmod(0o600)
         return 1
-    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
-    from app.utils.qt import prepare_plugins
+    from shiboken6 import delete, isValid
+    from app.utils.qt import prepare_plugins, single_shot
     from app.gui.window import MainWindow
     prepare_plugins()
     qt=QApplication(sys.argv[:1]);qt.setApplicationName('iPhone AutoBuyer');qt.setOrganizationName('AppleAutoBuyer')
     window=MainWindow(data_dir());window.show()
-    if args.smoke_test:
+    qt.aboutToQuit.connect(window.shutdown)
+    if args.embedded_smoke_test:
+        from PySide6.QtCore import QUrl
+        window.ensure_embedded();window.stack.setCurrentIndex(6)
+        page=window.embedded_browser.views[window.embedded_browser.primary_id].page()
+        finished=[False]
+        fixture_started=[False]
+        def embedded_done(value=None):
+            if finished[0]:return
+            finished[0]=True
+            success=value=='Offline embedded startup check'
+            if args.screenshot and success:
+                args.screenshot.parent.mkdir(parents=True,exist_ok=True);window.grab().save(str(args.screenshot))
+            print('EMBEDDED_SMOKE_OK' if success else 'EMBEDDED_SMOKE_FAILED',flush=True)
+            qt.exit(0 if success else 1)
+        def embedded_loaded(value):
+            if value=='Offline embedded startup check':embedded_done(value)
+        def embedded_document(loaded):
+            if not loaded:embedded_done();return
+            if not fixture_started[0]:
+                fixture_started[0]=True
+                page.setHtml('<h1>Offline embedded startup check</h1><p>Synthetic page only.</p>',QUrl('https://autobuyer.invalid/'))
+            else:page.runJavaScript("document.querySelector('h1')?.innerText",embedded_loaded)
+        page.loadFinished.connect(embedded_document)
+        page.renderProcessTerminated.connect(lambda *_:embedded_done())
+        single_shot(window,12000,embedded_done)
+    elif args.smoke_test:
         def done():
             if args.screenshot:
                 args.screenshot.parent.mkdir(parents=True,exist_ok=True);window.grab().save(str(args.screenshot))
             print('GUI_SMOKE_OK',flush=True);qt.quit()
-        QTimer.singleShot(1200,done)
-    return qt.exec()
+        single_shot(window,1200,done)
+    try:
+        return qt.exec()
+    finally:
+        if isValid(window):
+            window.shutdown()
+            # Keep QApplication and PySide's binding runtime alive while native
+            # accessibility objects and all child widgets are destroyed. Do not
+            # leave a populated QTableWidget to Python's atexit cleanup.
+            delete(window)
 
 if __name__=='__main__':
     raise SystemExit(main())

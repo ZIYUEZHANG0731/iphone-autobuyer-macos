@@ -52,18 +52,23 @@ def test_new_purchase_plan_preserves_old_order_lock(qt,tmp_path):
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
-def test_gui_timezone_switch_preserves_schedule(qt,tmp_path):
+def test_gui_old_berlin_schedule_keeps_exact_instant_in_beijing_only(qt,tmp_path):
     window=MainWindow(tmp_path)
     try:
-        window.timezone.setCurrentIndex(window.timezone.findData('Europe/Berlin'))
-        window.schedule_enabled.setChecked(True)
-        window.schedule.setDateTime(window.editor_datetime(datetime(2026,10,16,14)))
-        before=window.collect().starts_at
-        window.timezone.setCurrentIndex(window.timezone.findData('Asia/Shanghai'))
-        after=window.collect().starts_at
-        assert datetime.fromisoformat(before)==datetime.fromisoformat(after)
+        window.config.display_timezone='Europe/Berlin'
+        window.config.starts_at='2026-10-16T14:00:00+02:00'
+        window.populate();window.tick()
+        collected=window.collect()
+        assert datetime.fromisoformat(collected.starts_at)==datetime.fromisoformat(window.config.starts_at)
+        assert collected.display_timezone=='Asia/Shanghai'
+        assert window.timezone.text()=='北京时间'
         assert window.schedule.dateTime().toPython().hour==20
         assert '北京时间 2026-10-16 20:00:00' in window.schedule_note.text()
+        assert '柏林' not in window.schedule_note.text()
+        window.repo.save_config(collected)
+        window.config=window.repo.load_config();window.populate();window.tick()
+        assert datetime.fromisoformat(window.collect().starts_at)==datetime(2026,10,16,12,tzinfo=timezone.utc)
+        assert window.clock_caption.text()=='北京时间'
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
@@ -118,6 +123,110 @@ def test_rate_limit_disables_resume_and_new_browsing_until_deadline(qt,tmp_path,
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
 
 
+def test_consent_choice_requires_both_boxes_and_only_approves_active_task(qt,tmp_path):
+    from PySide6.QtWidgets import QCheckBox,QPushButton
+    window=MainWindow(tmp_path);control=Control(False)
+    window.worker=SimpleNamespace(isRunning=lambda:True,idle=False,control=control,session_open=True)
+    window.last_state='PAUSED'
+    data={'key':'offline-current-page','scope':'secure.www.apple.com.cn','details':'离线协议正文',
+          'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
+    try:
+        window.show_consent_help(data)
+        checks=window.consent_dialog.findChildren(QCheckBox)
+        button=next(b for b in window.consent_dialog.findChildren(QPushButton) if b.text()=='本次同意并继续')
+        assert len(checks)==2 and not button.isEnabled() and control.consent_approval is None
+        checks[0].setChecked(True);assert not button.isEnabled()
+        checks[1].setChecked(True);assert button.isEnabled()
+        button.click()
+        assert control.resume_event.is_set() and control.consume_consent(data['key'])
+        assert not control.consume_consent(data['key'])
+    finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
+
+
+def test_current_consent_can_be_reopened_from_payment_and_console_entries(qt,tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QCheckBox,QPushButton
+    window=MainWindow(tmp_path);control=Control(False)
+    window.worker=SimpleNamespace(isRunning=lambda:True,idle=False,control=control,session_open=True)
+    monkeypatch.setattr(window.tray,'showMessage',lambda *_:None)
+    data={'key':'offline-reopen-page','scope':'secure.www.apple.com.cn','details':'当前离线协议正文',
+          'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
+    try:
+        assert not window.consent_entry.isEnabled()
+        window.on_data('consent_required',data)
+        window.on_event({'state':'PAUSED','message':'当前协议待确认'})
+        assert window.consent_entry.isEnabled() and not window.console_consent_entry.isHidden()
+        original=window.consent_dialog;original.reject()
+        window.consent_entry.click()
+        assert window.consent_dialog is not original and window.consent_dialog.isVisible()
+        assert not any(c.isChecked() for c in window.consent_dialog.findChildren(QCheckBox))
+        assert not next(b for b in window.consent_dialog.findChildren(QPushButton) if b.text()=='本次同意并继续').isEnabled()
+        assert control.consent_approval is None
+        window.consent_dialog.reject();window.console_consent_entry.click()
+        assert window.consent_dialog.isVisible() and window.pending_consent['key']==data['key']
+        window.on_event({'state':'CUSTOMER_INFO_FILLED','message':'继续到取货信息'})
+        assert window.pending_consent is None and not window.consent_entry.isEnabled()
+        assert window.console_consent_entry.isHidden() and not window.consent_dialog.isVisible()
+    finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
+
+
+def test_new_task_and_cancel_remove_stale_consent_entries(qt,tmp_path):
+    window=MainWindow(tmp_path);control=Control(False)
+    worker=SimpleNamespace(isRunning=lambda:True,idle=False,control=control,session_open=True,
+                           stop_task=control.cancel_task)
+    window.worker=worker;window.last_state='PAUSED'
+    data={'key':'offline-cancel-page','scope':'secure.www.apple.com.cn','details':'当前离线协议正文',
+          'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
+    try:
+        window.show_consent_help(data);assert window.consent_entry.isEnabled()
+        window.stop()
+        assert window.pending_consent is None and not window.consent_entry.isEnabled()
+        assert not window.consent_dialog.isVisible() and control.consent_approval is None
+        control.reset_task();window.show_consent_help(data)
+        window.on_event({'state':'PREPARING','message':'新任务'})
+        assert window.pending_consent is None and not window.consent_entry.isEnabled()
+    finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
+
+
+def test_privacy_can_be_selected_before_checkout_and_survives_reopening_the_app(qt,tmp_path):
+    from app.services.consent import NOTICE_VERSION
+    window=MainWindow(tmp_path)
+    try:
+        assert not window.privacy_policy.isChecked() and not window.privacy_transfer.isChecked()
+        window.privacy_policy.setChecked(True);window.privacy_transfer.setChecked(True);window.save()
+        saved=window.repo.load_config()
+        assert saved.privacy_policy_accepted and saved.privacy_transfer_acknowledged
+        assert saved.privacy_notice_version==NOTICE_VERSION
+        assert not saved.auto_submit and not saved.transmit_identity
+    finally:window.close();window.deleteLater();qt.processEvents()
+    reopened=MainWindow(tmp_path)
+    try:
+        assert reopened.privacy_policy.isChecked() and reopened.privacy_transfer.isChecked()
+        assert not reopened.consent_entry.isEnabled()
+        reopened.privacy_transfer.setChecked(False);reopened.save()
+        assert not reopened.repo.load_config().privacy_transfer_acknowledged
+    finally:reopened.close();reopened.deleteLater();qt.processEvents()
+
+
+def test_imported_config_does_not_grant_privacy_or_transaction_authority(qt,tmp_path,monkeypatch):
+    import json
+    from app.services.consent import NOTICE_VERSION
+    window=MainWindow(tmp_path)
+    path=tmp_path/'import.json'
+    imported=deepcopy(window.config)
+    imported.auto_submit=True;imported.transmit_identity=True
+    imported.privacy_policy_accepted=True;imported.privacy_transfer_acknowledged=True
+    imported.privacy_notice_version=NOTICE_VERSION
+    path.write_text(json.dumps(imported.to_dict()),encoding='utf-8')
+    monkeypatch.setattr(QFileDialog,'getOpenFileName',lambda *_:(str(path),'JSON'))
+    try:
+        window.import_config();saved=window.repo.load_config()
+        assert not saved.auto_submit and not saved.transmit_identity
+        assert not saved.privacy_policy_accepted and not saved.privacy_transfer_acknowledged
+        assert saved.privacy_notice_version==''
+        assert not window.privacy_policy.isChecked() and not window.privacy_transfer.isChecked()
+    finally:window.close();window.deleteLater();qt.processEvents()
+
+
 def test_click_only_product_payment_and_authorization_preserve_saved_preferences(qt,tmp_path):
     from PySide6.QtCore import Qt
     window=MainWindow(tmp_path)
@@ -146,10 +255,11 @@ def test_official_duo_time_can_be_selected_without_typing_or_changing_the_instan
     window=MainWindow(tmp_path)
     try:
         window.product_choices.model.setCurrentIndex(window.product_choices.model.findText('iPhone Duo'))
-        window.timezone.setCurrentIndex(window.timezone.findData('Europe/Berlin'))
         window.use_official_time()
         assert window.schedule_enabled.isChecked()
         assert datetime.fromisoformat(window.collect().starts_at)==datetime(2026,10,16,12,tzinfo=timezone.utc)
+        assert window.schedule.dateTime().toPython().hour==20
+        assert '柏林' not in window.schedule_note.text()
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
@@ -182,4 +292,58 @@ def test_login_http_rejection_is_visible_while_waiting_for_manual_login(qt,tmp_p
         assert '541' in window.message_label.text() and '登录' in window.message_label.text()
         assert '会话' in window.message_label.text()
         assert not window.resume_button.isEnabled()
+    finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
+
+
+def test_directory_can_select_stores_before_duo_has_a_link_and_preserves_each_city(qt,tmp_path):
+    from PySide6.QtCore import Qt
+    window=MainWindow(tmp_path)
+    try:
+        window.config.product.name='iPhone Duo';window.config.product.url='';window.url.clear()
+        window.store_list.clear()
+        assert window.available_stores.rowCount()==49 and not window.store_results
+        for name in ('Apple 南京东路','Apple 三里屯'):
+            window.search.setText(name)
+            rows=[row for row in range(window.available_stores.rowCount())
+                  if not window.available_stores.isRowHidden(row)]
+            assert len(rows)==1
+            window.available_stores.selectRow(rows[0]);window.add_selected_store()
+            window.add_selected_store()  # No duplicate on repeated/double click.
+        assert window.store_list.count()==2
+        window.store_list.item(1).setCheckState(Qt.CheckState.Unchecked)
+        window.save()
+        saved=window.repo.load_config()
+        assert saved.product.url=='' and saved.product.discover_from_store
+        assert [(s.name,s.city,s.district,s.enabled) for s in saved.stores]==[
+            ('Apple 南京东路','上海','黄浦区',True),('Apple 三里屯','北京','朝阳区',False)]
+        # Checking another city in the directory is a filter, not a rewrite.
+        window.search.clear();window.store_city.setCurrentIndex(window.store_city.findData('杭州'))
+        assert window.collect().stores==saved.stores
+        assert all(window.available_stores.item(r,1).text()=='杭州'
+                   for r in range(49) if not window.available_stores.isRowHidden(r))
+    finally:window.close();window.deleteLater();qt.processEvents()
+
+
+def test_upgrade_keeps_existing_chrome_login_and_guest_strategy_is_click_selectable(qt,tmp_path):
+    from app.models.config import Settings
+    previous=Settings().to_dict();previous.pop('browser_kind')
+    assert Settings.from_dict(previous).browser_kind=='chrome'
+    window=MainWindow(tmp_path)
+    try:
+        assert not window.checkout_strategy.isEditable() and not window.browser_kind.isEditable()
+        window.checkout_strategy.setCurrentIndex(window.checkout_strategy.findData('account_only'))
+        window.save()
+        assert window.repo.load_config().checkout_strategy=='account_only'
+        assert window.repo.load_config().browser_kind=='embedded'
+    finally:window.close();window.deleteLater();qt.processEvents()
+
+
+def test_window_close_keeps_an_open_browser_worker_alive(qt,tmp_path,monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    window=MainWindow(tmp_path);control=Control(False)
+    window.worker=SimpleNamespace(isRunning=lambda:True,idle=True,control=control,session_open=True)
+    monkeypatch.setattr(window.tray,'showMessage',lambda *_:None)
+    try:
+        event=QCloseEvent();window.closeEvent(event)
+        assert not event.isAccepted() and not control.stop_event.is_set()
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()

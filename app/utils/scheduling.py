@@ -42,5 +42,4 @@ def future_start(value: str, *, now: datetime | None = None) -> datetime:
 def schedule_preview(value: datetime, zone_name: str) -> str:
     target = wall_time(value, zone_name)
     china = target.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')
-    berlin = target.astimezone(ZoneInfo('Europe/Berlin')).strftime('%Y-%m-%d %H:%M:%S')
-    return f'北京时间 {china}  /  柏林时间 {berlin}'
+    return f'北京时间 {china}'

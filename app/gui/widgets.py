@@ -19,6 +19,7 @@ PATHS={
     'help':'<circle cx="12" cy="12" r="9"/><path d="M9.5 8.5c0-3 5-3 5 0 0 2-2.5 2-2.5 4M12 16h.01"/>',
     'clock':'<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
     'check':'<path d="m5 12 4 4L19 6"/>',
+    'browser':'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M6 6.5h.01M9 6.5h.01M12 6.5h.01"/>',
 }
 
 

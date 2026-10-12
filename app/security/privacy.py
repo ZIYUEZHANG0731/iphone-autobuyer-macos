@@ -4,15 +4,18 @@ from dataclasses import asdict
 from threading import RLock
 from urllib.parse import urlsplit, urlunsplit
 from app.models.config import Identity
+from app.models.credential import AppleCredential
 
 class Redactor:
     def __init__(self):
         self._values: set[str] = set()
         self._lock = RLock()
 
-    def register(self, identity: Identity):
+    def register(self, identity: Identity | AppleCredential):
         with self._lock:
             self._values.update(v for v in asdict(identity).values() if v and len(v) > 2)
+            if isinstance(identity,AppleCredential) and identity.password:
+                self._values.add(identity.password)
 
     def clean(self, text: object) -> str:
         value = str(text)

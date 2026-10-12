@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import threading
+import time
 from pathlib import Path
 from app.models.flow import Stopped, FlowError
 
@@ -13,6 +14,17 @@ class Control:
         self.interactive = interactive
         self.site_cooldown=site_cooldown
         self.quote_lock=threading.Lock();self.approved_quotes=set()
+        self.consent_lock=threading.Lock();self.consent_approval=None
+
+    def approve_consent(self, key):
+        # A deliberate GUI action authorizes only this observed page, once.
+        # Nothing is persisted or inherited by another task/agreement.
+        with self.consent_lock:self.consent_approval=(key,time.monotonic()+120)
+
+    def consume_consent(self, key):
+        with self.consent_lock:
+            approval=self.consent_approval;self.consent_approval=None
+        return bool(approval and approval[0]==key and time.monotonic()<approval[1])
 
     def approve_quote(self,key):
         with self.quote_lock:self.approved_quotes.add(key)
@@ -22,17 +34,20 @@ class Control:
 
     def stop(self):
         self.stop_event.set()
+        with self.consent_lock:self.consent_approval=None
 
     def resume(self):
         self.resume_event.set()
 
     def cancel_task(self):
         self.cancel_event.set()
+        with self.consent_lock:self.consent_approval=None
 
     def reset_task(self):
         self.cancel_event.clear()
         self.resume_event.clear()
         with self.quote_lock:self.approved_quotes.clear()
+        with self.consent_lock:self.consent_approval=None
 
     def check_session(self):
         if self.stop_event.is_set():

@@ -50,13 +50,14 @@ def test_old_order_blocks_new_live_purchase_but_allows_dry_run():
     assert 'W1234567890' not in live['order'].detail
 
 
-def test_timezone_switch_preserves_exact_instant_and_dual_display():
+def test_legacy_timezone_preserves_exact_instant_and_beijing_only_display():
     berlin = datetime(2026, 10, 16, 14)
     china = convert_wall_time(berlin, 'Europe/Berlin', 'Asia/Shanghai')
     assert china == datetime(2026, 10, 16, 20)
     assert wall_time(china, 'Asia/Shanghai').timestamp() == wall_time(berlin, 'Europe/Berlin').timestamp()
     assert convert_wall_time(china, 'Asia/Shanghai', 'Europe/Berlin') == berlin
     assert '20:00:00' in schedule_preview(berlin, 'Europe/Berlin')
+    assert '柏林' not in schedule_preview(berlin, 'Europe/Berlin')
 
 
 @pytest.mark.parametrize('value', [datetime(2026, 3, 29, 2, 30), datetime(2026, 10, 25, 2, 30)])

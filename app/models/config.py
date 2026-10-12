@@ -98,6 +98,14 @@ class Settings:
     profile_id: str = ""
     auto_submit: bool = False
     transmit_identity: bool = False
+    privacy_policy_accepted: bool = False
+    privacy_transfer_acknowledged: bool = False
+    privacy_notice_version: str = ''
+    checkout_strategy: str = 'account_then_guest'
+    credential_id: str = ''
+    auto_login: bool = False
+    trust_browser: bool = False
+    browser_kind: str = 'embedded'
     keep_awake: bool = True
     allow_other_stores: bool = False
     no_stock: str = "wait"
@@ -132,6 +140,9 @@ class Settings:
                          **{k: v for k, v in raw.items() if k in allowed})
         except (TypeError, KeyError):
             raise ConfigError("配置格式不正确") from None
+        # An upgrade must not silently abandon a user's existing Chrome login.
+        if 'browser_kind' not in raw and raw:
+            result.browser_kind = 'chrome'
         result.validate(Mode.WEBSITE_DRY_RUN, require_stores=False)
         return result
 
@@ -162,16 +173,25 @@ class Settings:
             raise ConfigError('分期期数须为 0–60；0 表示不选分期，实际可用方案由官网验证')
         if self.no_stock not in ("wait", "stop"):
             raise ConfigError("缺货策略须为等待或停止")
-        for key in ("auto_submit", "transmit_identity", "allow_other_stores", "keep_awake"):
+        if self.checkout_strategy not in ('account_then_guest', 'account_only', 'guest'):
+            raise ConfigError('请选择有效的结账登录策略')
+        if self.browser_kind not in ('embedded', 'chrome'):
+            raise ConfigError('请选择内置浏览器或独立 Chrome 会话')
+        for key in ("auto_submit", "transmit_identity", "privacy_policy_accepted", "privacy_transfer_acknowledged", "allow_other_stores", "keep_awake", "auto_login", "trust_browser"):
             if type(getattr(self, key)) is not bool:
                 raise ConfigError("开关配置格式不正确")
+        if not isinstance(self.credential_id, str) or (self.credential_id and not re.fullmatch(
+                r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', self.credential_id)):
+            raise ConfigError('Apple 账户的钥匙串引用格式不正确')
+        if (self.auto_login or self.trust_browser) and not self.credential_id:
+            raise ConfigError('请先在官网浏览器页保存 Apple 账户')
         if any(type(s.enabled) is not bool for s in self.stores):
             raise ConfigError("门店开关格式不正确")
         if any(not all(isinstance(getattr(s,k),str) for k in ('name','city','store_id','province','district')) or not s.name.strip() for s in self.stores):
             raise ConfigError('门店文字配置格式不正确')
         if len({s.store_id or s.name for s in self.stores}) != len(self.stores):
             raise ConfigError("门店列表存在重复项")
-        if not all(isinstance(getattr(self,k),str) for k in ('profile_id','intent_id','pickup_from','pickup_to','starts_at','display_timezone','scenario')) or not self.intent_id:
+        if not all(isinstance(getattr(self,k),str) for k in ('profile_id','intent_id','pickup_from','pickup_to','starts_at','display_timezone','scenario','privacy_notice_version')) or not self.intent_id:
             raise ConfigError('配置引用、日期或时区格式不正确')
         try:
             ZoneInfo(self.display_timezone)
@@ -227,8 +247,10 @@ class Identity:
         if not re.fullmatch(r"\+?[0-9 \-]{7,18}", self.phone):
             raise ConfigError("手机号码格式不正确")
         if '后四位' in self.document_type:
-            if not re.fullmatch(r'[0-9Xx]{4}',self.document_number):
-                raise ConfigError('证件后四位格式不正确')
+            resident='居民身份证' in self.document_type
+            pattern=r'[0-9]{3}[0-9Xx]' if resident else r'[A-Za-z0-9]{4}'
+            if not re.fullmatch(pattern,self.document_number):
+                raise ConfigError('请填写证件后四位：四位数字，身份证末位为 X 时也可填写 X' if resident else '请填写证件号码的后四位')
         elif "身份证" in self.document_type:
             number = self.document_number.upper()
             if not re.fullmatch(r"[1-9]\d{16}[\dX]", number):

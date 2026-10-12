@@ -18,12 +18,15 @@ from app.services.simulation import local_config
 
 def test_cooldown_survives_restart_and_counts_one_page_rejection_as_one_episode(tmp_path):
     cooldown=SiteCooldown(tmp_path)
-    assert cooldown.block(60,now=1000)==300
-    assert cooldown.block(60,now=1010)==300
+    assert cooldown.block(5,now=1000,episode='first-navigation')==5
+    assert cooldown.block(5,now=1002,episode='first-navigation')==5
     restarted=SiteCooldown(tmp_path)
-    assert restarted.remaining(now=1020)==290
-    assert restarted.block(60,now=1311)==600
-    assert restarted.block(3600,now=1320)==3600
+    assert restarted.remaining(now=1003)==4
+    # A late rejected asset in this same document remains one episode.
+    assert restarted.block(5,now=1008,episode='first-navigation')==5
+    assert restarted.load()['failures']==1
+    assert restarted.block(5,now=1014,episode='second-navigation')==10
+    assert restarted.block(3600,now=1015,episode='second-navigation')==3600
     assert restarted.load()['failures']==2
 
 
@@ -78,6 +81,28 @@ async def test_503_busy_honors_retry_after_without_becoming_541_or_sending_anoth
         assert not await adapter.is_open();await adapter.reload();assert gets==['GET']
         adapter.busy_until=asyncio.get_running_loop().time()-1
         await adapter.reload();assert await adapter.is_open();assert gets==['GET','GET']
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_expired_entry_delay_does_not_make_541_error_heading_a_success(browser):
+    context=await browser.new_context();page=await context.new_page();gets=[]
+    async def respond(route):
+        gets.append(route.request.method)
+        index=len(gets)
+        await route.fulfill(status=541 if index==2 else 200,content_type='text/html; charset=utf-8',
+            body='<h1>稍后回来</h1>' if index==1 else '<h1>很抱歉，你要查找的网页找不到。</h1>' if index==2 else '<h1>购买 iPhone 17</h1>')
+    await context.route('**/*',respond);adapter=AppleAdapter(page,Control(False));config=local_config()
+    config.product.url='https://www.apple.com.cn/shop/buy-iphone/iphone-17'
+    try:
+        await adapter.prepare(config);assert not await adapter.is_open()
+        await adapter.reload()
+        from app.models.flow import RateLimited
+        with pytest.raises(RateLimited) as caught:await adapter.is_open()
+        assert caught.value.retry_opening
+        adapter.limited_until=asyncio.get_running_loop().time()-1
+        assert not await adapter.is_open() and gets==['GET','GET']
+        await adapter.reload();assert await adapter.is_open() and gets==['GET','GET','GET']
     finally:await context.close()
 
 
@@ -160,7 +185,14 @@ async def test_login_return_in_replacement_owned_tab_is_confirmed_without_new_cr
     context=await browser.new_context();page=await context.new_page();events=[];requests=[]
     async def respond(route):
         requests.append(route.request.method)
-        await route.fulfill(content_type='text/html; charset=utf-8',body='<a href="/shop/signOut">注销</a>')
+        if route.request.url=='https://www.apple.com.cn/store':
+            body='''<button id="globalnav-menubutton-link-bag" aria-expanded="false" onclick="
+            this.setAttribute('aria-expanded','true');document.querySelector('nav').hidden=false">购物袋</button>
+            <nav id="globalnav-submenu-bag" hidden><a href="/shop/signIn?ssi=PRIVATE_CONTEXT">登录</a></nav>'''
+        elif '/shop/signIn?' in route.request.url:
+            body='<h1>登录 Apple Store</h1><input aria-label="Apple 账户">'
+        else:body='<a href="/shop/signOut">注销</a>'
+        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
     await context.route('**/*',respond)
     session=BrowserSession(tmp_path);session.context=context;session.browser=browser;session.page=page
     worker=Worker('login',local_config(),tmp_path)
@@ -172,5 +204,5 @@ async def test_login_return_in_replacement_owned_tab_is_confirmed_without_new_cr
         result=await worker.browser_action(session,None)
         assert result['state']=='COMPLETED' and not session.page.is_closed()
         assert any(k=='login' and d.get('authenticated') is True for k,d in events)
-        assert requests==['GET','GET']
+        assert requests==['GET','GET','GET']
     finally:await context.close()

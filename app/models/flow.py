@@ -10,7 +10,10 @@ class UserAction(FlowError):
     pass
 
 class RateLimited(UserAction):
-    pass
+    def __init__(self, message, *, retry_after=0., retry_opening=False):
+        super().__init__(message)
+        self.retry_after = max(0., float(retry_after))
+        self.retry_opening = retry_opening
 
 class Unavailable(FlowError):
     pass

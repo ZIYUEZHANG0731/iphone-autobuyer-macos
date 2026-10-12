@@ -14,7 +14,7 @@ import math
 from playwright.async_api import Error as PlaywrightError
 from urllib.parse import urlsplit
 from PySide6.QtCore import QThread, Signal
-from app.models.config import Mode, Identity, ConfigError
+from app.models.config import Mode, Identity, ConfigError, apple_url
 from app.models.flow import FlowError, UserAction, Stopped, RateLimited
 from app.automation.control import Control, ProcessLock
 from app.automation.browser import BrowserSession, installed_chrome
@@ -24,11 +24,14 @@ from app.adapters.simulation import SimulationAdapter
 from app.services.simulation import SimStore, local_config
 from app.services.storage import Repository
 from app.services.payment import PaymentStore
-from app.security.keychain import IdentityVault
+from app.security.keychain import IdentityVault, CredentialVault
 from app.security.privacy import Redactor
 from app.utils.power import KeepAwake
 from app.services.catalog_reader import read_catalog
 from app.services.traffic import SiteCooldown
+from app.services.signin import SignInController
+from app.services.login import account_page_url, apple_auth_url, shop_signin_url
+from app.services.network_diagnosis import NetworkDiagnosis
 
 
 class Worker(QThread):
@@ -36,7 +39,7 @@ class Worker(QThread):
     data = Signal(str, object)
     completed = Signal(object)
 
-    def __init__(self, action, config, root, *, headless=False, interactive=True, parent=None):
+    def __init__(self, action, config, root, *, headless=False, interactive=True, parent=None, embedded=None):
         super().__init__(parent)
         self.action, self.config, self.root = action, deepcopy(config), Path(root)
         self.control, self.headless = Control(interactive,site_cooldown=SiteCooldown(self.root)), headless
@@ -44,9 +47,12 @@ class Worker(QThread):
         self.commands = queue.SimpleQueue()
         self.command_lock = threading.Lock()
         self.qr_requested = threading.Event()
+        self.focus_requested = threading.Event()
         self.review_data = {}
         self.captured_orders = set()
         self.session_open=False
+        self.embedded=embedded
+        self.sign_in=SignInController()
         self.limited_until=time.monotonic()+self.control.site_cooldown.remaining()
         self.busy_until=time.monotonic()+self.control.site_cooldown.busy_remaining()
 
@@ -94,6 +100,11 @@ class Worker(QThread):
         self.data.emit(kind, data)
 
     async def environment(self):
+        if self.config.browser_kind=='embedded':
+            from importlib.util import find_spec
+            available=find_spec('PySide6.QtWebEngineWidgets') is not None
+            from PySide6.QtCore import qVersion
+            return {'state':'COMPLETED','message':f'macOS {platform.mac_ver()[0]} · {platform.machine()}\n内置 Chromium / Qt {qVersion()} · 持久会话\nmacOS Keychain 用于取货人资料','browser_installed':available}
         from playwright.async_api import async_playwright
         async with async_playwright() as pw:
             installed = Path(pw.chromium.executable_path).exists()
@@ -131,9 +142,12 @@ class Worker(QThread):
         # One process stays open through login, setup and the scheduled run.
         # This retains session-only cookies, which may disappear on a restart.
         with ProcessLock(repo.path.with_suffix('.run.lock')):
-            async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless) as session:
+            async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless,embedded=self.embedded) as session:
                 self.session_open=True
-                self.data.emit('browser',{'name':session.label})
+                browser_kind='embedded' if session.embedded else 'chrome'
+                self.data.emit('browser',{'name':session.label,'kind':browser_kind})
+                diagnosis=NetworkDiagnosis(self.root,browser_kind,progress=self.progress)
+                await diagnosis.start(session.context,session.page)
                 watcher = asyncio.create_task(self.watch_payment(session, repo))
                 try:
                     while True:
@@ -167,6 +181,7 @@ class Worker(QThread):
                 finally:
                     watcher.cancel()
                     await asyncio.gather(watcher, return_exceptions=True)
+                    await diagnosis.close()
                     self.session_open=False
 
     async def browser_action(self, session, repo):
@@ -179,19 +194,25 @@ class Worker(QThread):
             return await self.environment()
         if hasattr(session,'ensure_page'):
             await session.ensure_page()
+        def read_credential(credential_id):
+            credential=CredentialVault().get(credential_id)
+            if repo:repo.redactor.register(credential)
+            return credential
+        login_options=dict(login_config=self.config,credential_provider=read_credential,
+                           sign_in=self.sign_in,page_focus=getattr(session,'focus_page',None))
         if self.action in ('website', 'live'):
             self.review_data = {}
             mode = Mode.WEBSITE_DRY_RUN if self.action == 'website' else Mode.LIVE
             identity = IdentityVault().get(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
             if identity:
                 repo.redactor.register(identity)
-            adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress)
+            adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
             self.active_adapter = adapter
             try:
                 return asdict(await Engine(repo, self.control, callback=self.event.emit, lock_held=True).run(self.config, adapter, mode, identity))
             finally:
                 adapter.detach()
-        adapter = AppleAdapter(session.page, self.control, progress=self.progress)
+        adapter = AppleAdapter(session.page, self.control, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
         self.active_adapter = adapter
         try:
             if self.action == 'catalog':
@@ -199,9 +220,29 @@ class Worker(QThread):
                 items = result['products']
                 self.data.emit('catalog', items)
                 return {'state': 'COMPLETED', 'message': f'已从官网更新 {len(items)} 个机型的配置' + ('；部分页面暂未读到，现有目录保留' if result['unread_pages'] else '')}
-            if self.action == 'login':
-                await session.page.goto('https://secure.www.apple.com.cn/shop/account/home', wait_until='domcontentloaded')
-                self.status('请在软件打开的浏览器完成 Apple 官网登录和验证，再点“继续检查”。登录后此浏览器会保持打开。', 'PAUSED')
+            if self.action in ('login','login_diagnosis'):
+                diagnostic=self.action=='login_diagnosis'
+                pending=self.sign_in.pending_page
+                if pending and not pending.is_closed():
+                    session.page=pending;adapter.bind_page(pending)
+                elif not (diagnostic and (account_page_url(session.page.url) or apple_auth_url(session.page.url)
+                                          or shop_signin_url(session.page.url))):
+                    self.status('正在从商店购物袋打开官网登录入口…')
+                    await adapter.open_store_signin(session.page)
+                if await adapter.login_status(timeout=1) is True:
+                    self.sign_in.authenticated(self.config.credential_id)
+                    return {'state':'COMPLETED','message':'原有登录仍有效。继续使用同一浏览器会话，无需重新登录'}
+                await adapter.focus_login(session.page)
+                message='已从购物袋进入登录诊断，请在官网完成一次登录，遇到错误后可查看控制台的请求记录。完成后点“继续检查”。' if diagnostic else '已从商店购物袋打开登录页，请在软件浏览器完成 Apple 登录和验证，再点“继续检查”。此浏览器会保持打开。'
+                if self.config.auto_login and not diagnostic:
+                    try:
+                        if await adapter.auto_sign_in(session.page):
+                            await adapter.confirm_login();return {'state':'COMPLETED','message':'已使用保存的账户登录并确认；浏览器会话持续保留'}
+                    except UserAction as exc:
+                        if isinstance(exc,RateLimited):raise
+                        message=str(exc);self.sign_in.pending_page=session.page
+                        await adapter.focus_login(session.page)
+                self.status(message, 'PAUSED')
                 if not self.control.interactive:
                     return {'state': 'PAUSED', 'message': '等待你在 Apple 官网登录'}
                 await self.control.wait_resume()
@@ -210,11 +251,13 @@ class Worker(QThread):
                     current=await session.ensure_page(prefer_account=True)
                     if current is not original:
                         adapter.bind_page(current)
+                if self.config.auto_login and not diagnostic:await adapter.auto_sign_in(adapter.page)
                 await adapter.confirm_login()
+                self.sign_in.authenticated(self.config.credential_id)
                 return {'state': 'COMPLETED', 'message': '已确认登录。浏览器会话持续保留，可直接设置开售时间并开始等待'}
             if self.action == 'login_check':
                 checked=await adapter.check_login()
-                return {'state': 'COMPLETED', 'message': '当前浏览器登录已确认；Apple 仍可在结账时要求重新验证' if checked else '官网暂时无法复核登录；现有浏览器会话保留，结账仍需验证'}
+                return {'state': 'COMPLETED', 'message': '当前浏览器登录已确认；Apple 仍可在结账时要求重新验证' if checked is True else '官网明确要求登录；已保留会话，结账按预选策略处理' if checked is False else '官网暂时无法复核登录；现有浏览器会话保留，结账时再检查'}
             if self.action == 'receipt':
                 await self.capture_payment(session, repo, requested=True)
                 return {'state': 'COMPLETED', 'message': '已读取官网当前付款二维码'}
@@ -229,7 +272,6 @@ class Worker(QThread):
                 self.config.validate(Mode.WEBSITE_DRY_RUN)
                 await adapter.select_product(self.config)
                 states = await adapter.availability(self.config)
-                self.data.emit('stores', [{'name': a.store.name, 'store_id': a.store.store_id, 'city': a.store.city, 'available': a.available, 'quote': a.quote} for a in states])
                 return {'state': 'COMPLETED', 'message': '已读取官网自提选项；此结果不代表库存已锁定'}
             raise FlowError('未知检查任务')
         finally:
@@ -237,6 +279,14 @@ class Worker(QThread):
 
     async def watch_payment(self, session, repo):
         while not self.control.stop_event.is_set():
+            if self.focus_requested.is_set():
+                self.focus_requested.clear()
+                try:
+                    page=await session.ensure_page()
+                    if hasattr(session,'focus_page'):await session.focus_page()
+                    else:await page.bring_to_front()
+                    if self.embedded:self.data.emit('embedded_focus',True)
+                except Exception:self.data.emit('browser_focus_error','软件浏览器尚未准备好，请查看当前会话状态')
             requested = self.qr_requested.is_set()
             self.qr_requested.clear()
             at_receipt = urlsplit(session.page.url).path == '/shop/checkout/thankyou'

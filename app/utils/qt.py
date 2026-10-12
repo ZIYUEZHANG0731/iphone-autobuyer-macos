@@ -4,7 +4,22 @@ import os
 import stat
 import sys
 
+
+def single_shot(parent, milliseconds, callback):
+    """Keep deferred callbacks owned by their Qt parent."""
+    from PySide6.QtCore import QTimer
+    timer=QTimer(parent)
+    timer.setSingleShot(True)
+    timer.timeout.connect(callback)
+    timer.timeout.connect(timer.deleteLater)
+    timer.start(milliseconds)
+    return timer
+
+
 def prepare_plugins():
+    from PySide6.QtCore import QCoreApplication, Qt
+    if QCoreApplication.instance() is None:
+        QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     if sys.platform!='darwin':
         return
     from PySide6.QtCore import QLibraryInfo

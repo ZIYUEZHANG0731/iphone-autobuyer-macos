@@ -84,9 +84,14 @@ def preparation_items(config: Settings, *, mode: Mode = Mode.LIVE,
             verified = checked.tzinfo is not None and 0 <= age <= 600
         except (KeyError, ValueError, TypeError):
             pass
-    add('login', '预登录会话', 'ready' if verified else 'unknown',
+    guest=config.checkout_strategy=='guest'
+    fallback=config.checkout_strategy=='account_then_guest'
+    add('login', '预登录会话', 'ready' if verified or guest else 'unknown',
+        '选择了无需预登录的游客策略；实际仍可能要求手机验证码' if guest else
         '最近 10 分钟内确认登录，软件浏览器仍打开；官网仍可能要求认证' if verified
-        else '现有会话需复核，请登录或检查登录状态；不会承诺账号永久有效', 4,
+        else '已预选钥匙串自动登录；需提前完成首次验证，Apple 仍可能再次要求验证码' if config.auto_login
+        else '登录暂未确认；结账出现登录页时按游客备用继续，手机验证仍可能暂停' if fallback
+        else '现有会话需复核，请提前登录；失效时按设置等待重新登录', 4,
         '检查登录状态' if session_open else '登录并保持会话')
 
     if submission:
