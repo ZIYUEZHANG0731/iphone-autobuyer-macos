@@ -100,7 +100,7 @@ class Worker(QThread):
         if kind=='checkout_page':
             # Only public fulfillment choices, never a checkout DOM/body or
             # identity/payment values. This stays outside the source tree.
-            write_private_json(self.root/'checkout-diagnostic.json',data if data['stage']=='pickup' else
+            write_private_json(self.root/'checkout-diagnostic.json',data if data['stage'] in ('pickup','pickup_unavailable') else
                 {k:data[k] for k in ('stage','contact_fields','continuation_buttons')})
         if kind=='checkout_observation':
             # Known field titles/button categories only; no field values or DOM dump.

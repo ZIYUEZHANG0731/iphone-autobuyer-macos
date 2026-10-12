@@ -42,7 +42,7 @@ async def checkout_page():
 
 
 def settings():
-    return Settings(transmit_identity=True,privacy_policy_accepted=True,privacy_transfer_acknowledged=True,
+    return Settings(stores=[Store('Apple 南京东路',store_id='R359')],transmit_identity=True,privacy_policy_accepted=True,privacy_transfer_acknowledged=True,
                     privacy_notice_version=NOTICE_VERSION)
 
 
@@ -105,6 +105,90 @@ async def test_matching_store_name_with_a_different_store_number_does_not_contin
     with pytest.raises(UserAction,match='门店编号与目标门店不一致'):
         await adapter_for(page).fill_customer(contact(),settings())
     assert await page.evaluate('window.pickupClicks')==0
+
+
+def fallback_settings():
+    config=settings()
+    config.stores.append(Store('Apple 上海环贸 iapm',store_id='R401'))
+    return config
+
+
+def fulfillment_html(*,primary_disabled=False,delayed_backup=False,fail_primary=False,keep_page=False,backup_quote='今天可取货'):
+    backup=f'''<label><input type="radio" name="store" value="R401"
+        onchange="document.getElementById('next').disabled=false">3 Apple 上海环贸 iapm {backup_quote}</label>'''
+    more='''<div id="more-stores"></div><button onclick="window.moreClicks++;
+        setTimeout(()=>document.getElementById('more-stores').innerHTML=window.backupHTML,200)">显示更多取货地点</button>''' if delayed_backup else backup
+    action='''window.continued.push(document.querySelector('input[name=store]:checked').value);
+        if(window.failPrimary && window.continued.at(-1)==='R359') {
+          document.querySelector('input[value=R359]').disabled=true;this.disabled=true;
+        } else if(!window.keepPage) document.querySelector('main').innerHTML=window.contactHTML;'''
+    return f'''<main><h1>选择取货零售店</h1>
+        <label><input type="radio" name="store" value="R390" onchange="document.getElementById('next').disabled=false">1 Apple 香港广场 今天可取货</label>
+        <label><input type="radio" name="store" value="R359" {'disabled checked' if primary_disabled else ''}
+          onchange="document.getElementById('next').disabled=false">2 Apple 南京东路 今天可取货</label>
+        {more}<button id="next" disabled onclick="{action}">继续填写取货详情</button></main>
+        <script>window.moreClicks=0;window.continued=[];window.failPrimary={json.dumps(fail_primary)};
+        window.keepPage={json.dumps(keep_page)};window.contactHTML={json.dumps(CONTACT)};window.backupHTML={json.dumps(backup)};</script>'''
+
+
+@pytest.mark.parametrize('delayed',[False,True])
+async def test_checkout_uses_an_allowed_backup_without_removing_or_readding_the_item(checkout_page,delayed):
+    page=checkout_page
+    await page.set_content(fulfillment_html(primary_disabled=True,delayed_backup=delayed))
+    config=fallback_settings();events=[];adapter=adapter_for(page,events=events)
+    await adapter.fill_customer(contact(),config)
+    assert adapter.selected.store.store_id=='R401'
+    assert await page.evaluate('window.continued')==['R401']
+    assert await page.evaluate('window.moreClicks')==int(delayed)
+    assert page.url.endswith('Fulfillment-init') and not adapter.add_attempted
+    assert any(k=='pickup_changed' and d['store_id']=='R401' for k,d in events)
+
+
+async def test_checkout_fallback_honors_the_saved_priority_instead_of_dom_order(checkout_page):
+    page=checkout_page;await page.set_content(fulfillment_html())
+    config=fallback_settings();config.stores.reverse()
+    adapter=adapter_for(page)
+    await adapter.fill_customer(contact(),config)
+    assert adapter.selected.store.store_id=='R401'
+    assert await page.evaluate('window.continued')==['R401']
+
+
+async def test_disabled_preferences_and_unlisted_available_stores_are_not_chosen(checkout_page):
+    page=checkout_page;await page.set_content(fulfillment_html(primary_disabled=True))
+    config=fallback_settings();config.stores[1].enabled=False
+    with pytest.raises(UserAction,match='购物袋保留'):
+        await adapter_for(page).fill_customer(contact(),config)
+    assert await page.evaluate('window.continued')==[]
+    assert (await checkout_state(page))['stage']=='pickup_unavailable'
+
+
+async def test_stock_rejection_after_fulfillment_continue_switches_stores_in_the_same_checkout(checkout_page):
+    page=checkout_page;await page.set_content(fulfillment_html(fail_primary=True))
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),fallback_settings()),5)
+    assert await page.evaluate('window.continued')==['R359','R401']
+    assert adapter.checkout_continued_stores=={'R359','R401'}
+    assert adapter.selected.store.store_id=='R401' and adapter.identity_filled
+
+
+async def test_uncertain_fulfillment_navigation_does_not_repeat_or_switch_an_available_store(checkout_page):
+    page=checkout_page;await page.set_content(fulfillment_html(keep_page=True))
+    adapter=adapter_for(page);config=fallback_settings()
+    await adapter._select_checkout_pickup(config)
+    with pytest.raises(UserAction,match='继续已尝试'):
+        await adapter._select_checkout_pickup(config)
+    assert await page.evaluate('window.continued')==['R359']
+
+
+async def test_backup_must_meet_the_actual_pickup_date_constraint(checkout_page):
+    from datetime import datetime,timedelta
+    from zoneinfo import ZoneInfo
+    page=checkout_page;await page.set_content(fulfillment_html(backup_quote='明天可取货'))
+    config=fallback_settings();config.pickup_from=(datetime.now(ZoneInfo('Asia/Shanghai')).date()+timedelta(days=1)).isoformat()
+    adapter=adapter_for(page)
+    await adapter.fill_customer(contact(),config)
+    assert adapter.selected.store.store_id=='R401' and adapter.selected.pickup_date==config.pickup_from
+    assert await page.evaluate('window.continued')==['R401']
 
 
 @pytest.mark.parametrize('route',['/shop/checkout','/shop/signIn/checkout'])

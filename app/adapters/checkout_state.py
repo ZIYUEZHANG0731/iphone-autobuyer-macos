@@ -33,6 +33,8 @@ CHECKOUT_STATE_SCRIPT = r'''({wait, wanted}) => {
     else if (buttons.includes('以游客身份继续')) stage = 'guest';
     else if (buttons.includes('继续填写取货详情') || buttons.includes('选择取货零售店') ||
              radios.some(r => /^(我要)?取货(?:\s|$)/.test(r.label))) stage = 'pickup';
+    if (stage==='pickup' && radios.some(r => r.checked && r.disabled && /^R\d{3,6}$/.test(r.value)))
+      stage='pickup_unavailable';
     const diagnosticButtons = Array.from(root?.querySelectorAll('button,[role="button"],input[type="submit"],input[type="button"]') || [])
       .filter(visible).map(e => name(e) || e.value || '');
     const hints = ['继续','继续选择付款方式','继续填写取货详情','验证','获取验证码','重试'];

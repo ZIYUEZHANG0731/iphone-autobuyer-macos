@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, date, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
@@ -23,6 +23,8 @@ from app.adapters.apple_login import AppleLogin
 from app.adapters.apple_consent import AppleConsent
 from app.adapters.controls import ensure_checked
 from app.adapters.checkout_state import checkout_state
+from app.adapters.apple_pickup import ApplePickup, pickup_date
+from app.adapters.bag_state import bag_has_items
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
 from copy import deepcopy
@@ -43,7 +45,7 @@ CONTROL_SCRIPT = '''() => {
  }));
 }'''
 
-class AppleAdapter(AppleLogin, AppleConsent):
+class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
     # A real CMB/24-month order and thank-you page were observed on 2026-10-11.
     # Automatic submission still requires a fully verified review, including store.
     @property
@@ -85,6 +87,8 @@ class AppleAdapter(AppleLogin, AppleConsent):
         self.stock_region=None
         self.guest_attempted=False
         self.pickup_continue_attempted=False
+        self.checkout_last_continued=''
+        self.checkout_continued_stores=set()
         self.checkout_more_attempted=False
         self.checkout_observed_stage=None
         self.login_config=login_config
@@ -531,21 +535,13 @@ class AppleAdapter(AppleLogin, AppleConsent):
         await self.guard()
         controls=await dialog.locator('input[name^="store-"]').evaluate_all('''els => els.map(e=>({id:e.value,label:Array.from(e.labels||[]).map(l=>l.innerText).join(' '),disabled:e.disabled}))''')
         result=[]
-        today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
         for c in controls:
             lines=[l.strip() for l in c['label'].split('\n') if l.strip()]
             if not lines: continue
             quote=' '.join(lines[1:])
             # Presence of an enabled store radio is only an available selection, not a reservation.
             available=not c['disabled'] and bool(re.search(r'可取货|可以取货',quote))
-            when=None
-            if '今天' in quote: when=today.isoformat()
-            elif '明天' in quote: when=(today+timedelta(days=1)).isoformat()
-            else:
-                match=re.search(r'(\d{1,2})\s*月\s*(\d{1,2})\s*日',quote)
-                if match:
-                    try: when=date(today.year,int(match[1]),int(match[2])).isoformat()
-                    except ValueError: pass
+            when=pickup_date(quote)
             store=self.store_directory.enrich(Store(name=lines[0],city=lines[1].split(',')[0] if len(lines)>1 else '',store_id=c['id']))
             result.append(Availability(store,available,quote,when))
         self.progress('stock_query',{'completed_at':datetime.now(timezone.utc).isoformat(),
@@ -618,30 +614,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
             await dialog.get_by_role('button',name='继续',exact=True).click()
         self.selected=availability
         if not self.add_attempted:
-            # Never merge a task into unrelated items or repeat a click of unknown result.
-            bag = await self.new_page()
-            bag.on('response',self._response)
-            try:
-                await bag.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
-                await self.guard(bag)
-                await bag.get_by_role('heading',level=1).wait_for()
-                existing=bag.get_by_role('button',name=re.compile(r'^移除 '))
-                if await existing.count():
-                    if self.mode==Mode.WEBSITE_DRY_RUN:
-                        # A restarted trial may retain its previous item. Adopt
-                        # only a fully matched bag, without adding/removing items
-                        # or changing quantity. A live purchase still stays manual.
-                        await self._validate_bag(config,bag)
-                        self.add_attempted=True
-                        await self.page.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
-                        await self.guard()
-                        await self._validate_bag(config)
-                        self.cart_checked=True
-                        return
-                    raise UserAction("该浏览器购物袋已有商品，请手动核对或移除后再继续；软件不自动清空购物袋")
-            finally:
-                bag.remove_listener('response',self._response)
-                await self.page_closer(bag)
+            if await self.resume_cart(config):return
             self.add_attempted=True
             try:
                 await self.page.get_by_role('button',name='添加到购物袋',exact=True).click()
@@ -656,7 +629,8 @@ class AppleAdapter(AppleLogin, AppleConsent):
                 raise UserAction("官网加购后的页面已变化，请在浏览器打开购物袋后继续") from None
         await self.page.wait_for_url(re.compile(r'/shop/bag'),timeout=30000)
         await self.guard()
-        await self.page.get_by_role('heading',level=1).wait_for()
+        if not await bag_has_items(self.page,self.control,self.guard):
+            raise UserAction('加购后购物袋仍未显示目标商品，页面已保留；不会重复加购')
         quantities=self.page.get_by_role('combobox',name='数量',exact=True)
         if await quantities.count()!=1:
             raise UserAction("购物袋商品数量无法唯一确认，已暂停")
@@ -669,6 +643,36 @@ class AppleAdapter(AppleLogin, AppleConsent):
             self.public_screenshot.parent.mkdir(parents=True,exist_ok=True)
             await self.page.screenshot(path=str(self.public_screenshot))
             self.public_screenshot.chmod(0o600)
+
+    async def resume_cart(self,config,*,timeout=15):
+        """Use an exact existing bag in trials and purchases, without mutations."""
+        if self.cart_checked:return True
+        if self.add_attempted:return False
+        bag=await self.new_page();bag.on('response',self._response)
+        try:
+            await bag.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+            if urlsplit(bag.url).path.rstrip('/')!='/shop/bag':
+                await self.guard(bag)
+                raise UserAction('官网购物袋跳转尚未完成，请核对当前页面；不会再次加购')
+            if not await bag_has_items(bag,self.control,self.guard,timeout=timeout):return False
+            await self._validate_bag(config,bag)
+            # There is no stock requirement here: fulfillment will read the
+            # current allowed stores from checkout, without re-adding the item.
+            self.add_attempted=True
+            await self.page.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+            if not await bag_has_items(self.page,self.control,self.guard,timeout=timeout):
+                raise UserAction('复核时购物袋已变化，页面保留；不会重新加购')
+            await self._validate_bag(config)
+            self.cart_checked=True
+            if not self.selected:
+                preferred=next((s for s in config.stores if s.enabled),None)
+                if not preferred:raise UserAction('请先设置允许的取货门店；购物袋保留')
+                self.selected=Availability(self.store_directory.enrich(preferred),False,'结账时核对当前取货选项')
+            self.progress('bag_reused',{'message':'已复用核对一致的购物袋；直接在结账页检查取货门店，没有重新加购'})
+            return True
+        finally:
+            bag.remove_listener('response',self._response)
+            await self.page_closer(bag)
 
     async def _validate_bag(self,config,page=None):
         page=page or self.page
@@ -697,7 +701,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
                 raise FlowError("购物袋商品配置与选中配置不一致")
         await self.accept_price(config,money(match[1]))
         self.bag_total=money(match[1])
-        self.progress('bag',{'product':matching[0],'quantity':config.product.quantity,'total':str(self.bag_total),'store':self.selected.store.name})
+        self.progress('bag',{'product':matching[0],'quantity':config.product.quantity,'total':str(self.bag_total),'store':self.selected.store.name if self.selected else ''})
 
     async def options_for_bag(self,config):
         result=[]
@@ -717,7 +721,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
             await self.page.get_by_role('button',name='结账',exact=True).first.click()
             await self._wait_checkout_entry()
         current_stage=(await checkout_state(self.page))['stage']
-        fulfillment_ready=current_stage in ('pickup','contact','payment')
+        fulfillment_ready=current_stage in ('pickup','pickup_unavailable','contact','payment')
         if not fulfillment_ready and config.checkout_strategy!='guest' and config.auto_login:
             # Credentials take priority over the explicitly selected guest backup.
             # A rejected/uncertain attempt pauses with the bag intact.
@@ -739,9 +743,9 @@ class AppleAdapter(AppleLogin, AppleConsent):
         elif not fulfillment_ready and await visible_login_form(self.page):
             raise UserAction('官网需要登录且当前未显示游客入口；请完成登录，不会反复提交账户密码')
         stage=await self._wait_checkout_stage()
-        if stage=='pickup':
+        while stage in ('pickup','pickup_unavailable'):
             await self._select_checkout_pickup(config)
-            stage=await self._wait_checkout_stage(wanted=('contact','payment'),timeout=15)
+            stage=await self._wait_checkout_stage(wanted=('contact','payment','pickup_unavailable'),timeout=15)
         if stage=='contact':
             await self.inspect_customer_fields()
             if self.identity_filled:
@@ -771,39 +775,6 @@ class AppleAdapter(AppleLogin, AppleConsent):
         if stage!='payment':
             raise UserAction("当前结账阶段无法确认，请在浏览器处理登录或提示后继续")
 
-    async def _select_checkout_pickup(self,config):
-        if not self.selected:raise UserAction('本次任务尚未核对目标取货门店，请重新检查库存')
-        await self.focus_control(self.page)
-        pickup=self.page.get_by_role('radio',name=re.compile(r'^(我要)?取货(?:\s|$)')).filter(visible=True)
-        if await pickup.count()==1:await self._check_radio(pickup)
-        # The fulfillment page can already be in pickup mode with no delivery
-        # toggle. Its continuation control, rather than a fixed toggle label,
-        # identifies that stage. Never choose a different store or shipping.
-        name=re.sub(r'^Apple\s*','',self.selected.store.name).strip()
-        pattern=re.compile(r'^(?:\d+\s+)?(?:Apple\s*)?'+re.escape(name).replace(r'\ ',r'\s*')+r'(?:\s|$)')
-        target=self.page.get_by_role('radio',name=pattern).filter(visible=True)
-        if not await target.count():
-            more=self.page.get_by_role('button',name='显示更多取货地点',exact=True)
-            if await more.is_visible() and not self.checkout_more_attempted:
-                self.checkout_more_attempted=True;await more.click()
-        try:
-            await expect(target).to_have_count(1,timeout=8000)
-            store_id=await target.get_attribute('value')
-            if store_id and self.selected.store.store_id and store_id!=self.selected.store.store_id:
-                raise UserAction('结账门店编号与目标门店不一致，页面已保留；不会选择其他门店')
-            if not await target.is_enabled():raise UserAction('结账阶段目标门店已不可用，请核对；不会切换为邮寄配送')
-            await self._check_radio(target)
-            continuation=self.page.get_by_role('button',name='继续填写取货详情',exact=True)
-            await expect(continuation).to_be_enabled(timeout=8000)
-            if self.pickup_continue_attempted:
-                raise UserAction('取货门店继续已尝试，官网尚未完成跳转；保留页面，不重复提交')
-            self.pickup_continue_attempted=True
-            await continuation.click()
-            self.progress('checkout_pickup',{'store':self.selected.store.name,'message':'已核对结账取货门店，等待取货资料页'})
-        except (AssertionError,PlaywrightError):
-            await self.guard()
-            raise UserAction('官网取货门店尚未就绪或尚未允许继续，请查看门店和取货时间；当前页面保留') from None
-
     async def check_customer_verification(self):
         verify=self.page.get_by_role('button',name='验证',exact=True).filter(visible=True)
         codes=self.page.locator('input[autocomplete="one-time-code"]').filter(visible=True)
@@ -814,7 +785,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
     async def _wait_checkout_entry(self,timeout=30):
         return await self._wait_checkout_stage(timeout=timeout,entry=True)
 
-    async def _wait_checkout_stage(self, *, wanted=('pickup','contact','payment'),timeout=30,entry=False):
+    async def _wait_checkout_stage(self, *, wanted=('pickup','pickup_unavailable','contact','payment'),timeout=30,entry=False):
         deadline=asyncio.get_running_loop().time()+timeout
         observed=tuple(wanted)+('consent',)+(('guest',) if entry or not self.guest_attempted else ())
         while asyncio.get_running_loop().time()<deadline:
@@ -832,7 +803,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
                 # Control names/store options only. Never emit body text or
                 # contact input values from this in-memory snapshot.
                 self.progress('checkout_page',{'stage':stage,'buttons':snapshot['diagnostic_buttons'],
-                    'radios':snapshot['radios'] if stage=='pickup' else [],
+                    'radios':snapshot['radios'] if stage in ('pickup','pickup_unavailable') else [],
                     'contact_fields':snapshot['contact_fields'],'continuation_buttons':snapshot['continuation_buttons']})
             if apple_auth_url(self.page.url):await self.login_guard(self.page)
             elif stage!='consent' or not entry:await self.guard(text=snapshot['text'])
@@ -852,7 +823,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
             'contact_fields':snapshot['contact_fields'],'continuation_buttons':snapshot['continuation_buttons'],
             **({'buttons':snapshot['diagnostic_buttons'],
                 'radios':[r for r in snapshot['radios'] if re.fullmatch(r'R\d{3,6}',r['value'])
-                          or re.match(r'^(为我送货|我要取货|取货日期|取货时间)',r['label'])]} if snapshot['stage']=='pickup' else {})})
+                          or re.match(r'^(为我送货|我要取货|取货日期|取货时间)',r['label'])]} if snapshot['stage'] in ('pickup','pickup_unavailable') else {})})
         raise UserAction('官网结账尚未完成加载，当前购物袋保留，请查看页面后继续')
 
     async def inspect_customer_fields(self):

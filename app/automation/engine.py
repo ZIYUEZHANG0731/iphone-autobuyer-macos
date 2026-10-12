@@ -147,19 +147,29 @@ class Engine:
                 self.emit(State.STORE_OPEN,"购买页面可访问；继续验证配置和自提")
                 await self.operation(lambda:adapter.select_product(config))
                 self.emit(State.PRODUCT_SELECTED,"已选择并检查商品配置")
-                stock_delay=max(config.interval,10.0) if mode!=Mode.LOCAL_TEST else config.interval
-                while True:
-                    states=await self.operation(lambda:adapter.availability(config))
-                    selected=self.choose_store(config,states)
-                    if selected: break
-                    if config.no_stock=='stop' or time.monotonic()>deadline:
-                        raise Unavailable("所有允许的门店均无可接受的自提选项；未切换配送")
-                    self.emit(State.PRODUCT_SELECTED,f"允许的门店暂不可取货；{stock_delay:.1f} 秒后重新查询，会话保留")
-                    await self.control.sleep(stock_delay)
-                    stock_delay=min(config.max_interval,stock_delay*1.8)
-                await self.operation(lambda:adapter.select_pickup(selected,config))
-                self.emit(State.PICKUP_SELECTED,f"已选择 {selected.store.name}；库存尚未锁定")
+                resumed_cart=await self.operation(lambda:adapter.resume_cart(config)) if hasattr(adapter,'resume_cart') else False
+                selected=None
+                if resumed_cart:
+                    self.emit(State.PRODUCT_SELECTED,'已有购物袋核对通过；在当前结账页选择允许的取货门店，不重新加购')
+                else:
+                    stock_delay=max(config.interval,10.0) if mode!=Mode.LOCAL_TEST else config.interval
+                    while True:
+                        states=await self.operation(lambda:adapter.availability(config))
+                        selected=self.choose_store(config,states)
+                        if selected: break
+                        if config.no_stock=='stop' or time.monotonic()>deadline:
+                            raise Unavailable("所有允许的门店均无可接受的自提选项；未切换配送")
+                        self.emit(State.PRODUCT_SELECTED,f"允许的门店暂不可取货；{stock_delay:.1f} 秒后重新查询，会话保留")
+                        await self.control.sleep(stock_delay)
+                        stock_delay=min(config.max_interval,stock_delay*1.8)
+                    await self.operation(lambda:adapter.select_pickup(selected,config))
+                    self.emit(State.PICKUP_SELECTED,f"已选择 {selected.store.name}；库存尚未锁定")
                 await self.operation(lambda:adapter.fill_customer(identity,config))
+                actual=getattr(adapter,'selected',None)
+                if resumed_cart or (isinstance(actual,Availability) and actual.store.store_id!=selected.store.store_id):
+                    if not isinstance(actual,Availability) or not actual.available:
+                        raise UserAction('当前结账门店尚未确认，购物袋保留')
+                    self.emit(State.PICKUP_SELECTED,f'已核对结账取货门店 {actual.store.name}；库存尚未锁定')
                 self.emit(State.CUSTOMER_INFO_FILLED,"取货信息已填写并验证，日志不保存身份字段")
                 await self.operation(lambda:adapter.select_payment(config))
                 self.emit(State.PAYMENT_SELECTED,"已选择当前页面实际可用的授权付款方式")

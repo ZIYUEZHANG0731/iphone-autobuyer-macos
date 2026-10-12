@@ -553,9 +553,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             if data.get('changed'):
                 self.console_log.appendPlainText('检测到本机网络设置变化；登录页与现有会话保留。请在同一官网登录页验证连接结果。')
         elif kind=='checkout_auth':self.console_log.appendPlainText(data['message'])
+        elif kind=='bag_reused':self.console_log.appendPlainText(data['message'])
+        elif kind=='pickup_changed':self.console_log.appendPlainText('结账取货门店已切换：'+data['previous']+' → '+data['store']+'；购物袋商品保留')
         elif kind=='checkout_pickup':self.console_log.appendPlainText(data['message']+'：'+data['store'])
         elif kind=='checkout_page':
-            stage={'loading':'正在加载','guest':'账户或游客入口','consent':'隐私声明','pickup':'取货门店',
+            stage={'loading':'正在加载','guest':'账户或游客入口','consent':'隐私声明','pickup':'取货门店','pickup_unavailable':'取货门店缺货，检查备用门店',
                    'contact':'取货资料','payment':'付款方式'}.get(data['stage'],'正在加载')
             self.console_log.appendPlainText('官网结账：'+stage)
         elif kind=='verification_required':
