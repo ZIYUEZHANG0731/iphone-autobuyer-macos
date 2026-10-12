@@ -98,8 +98,8 @@ class Settings:
     profile_id: str = ""
     auto_submit: bool = False
     transmit_identity: bool = False
-    privacy_policy_accepted: bool = False
-    privacy_transfer_acknowledged: bool = False
+    privacy_policy_accepted: bool = True
+    privacy_transfer_acknowledged: bool = True
     privacy_notice_version: str = ''
     checkout_strategy: str = 'account_then_guest'
     credential_id: str = ''

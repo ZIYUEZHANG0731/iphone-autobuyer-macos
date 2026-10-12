@@ -33,12 +33,13 @@ def test_account_dialog_masks_password_and_requires_new_password_for_a_different
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
 
 
-def test_new_account_permission_is_an_explicit_checkbox(qt):
+def test_direct_account_entry_defaults_to_session_memory_and_auto_login(qt):
     dialog=AccountDialog()
     try:
-        assert not dialog.auto_login.isChecked() and not dialog.trust_browser.isEnabled()
+        assert dialog.auto_login.isChecked() and dialog.trust_browser.isEnabled()
+        assert dialog.trust_browser.isChecked() and not dialog.persist.isChecked()
         dialog.auto_login.click()
-        assert dialog.trust_browser.isEnabled() and not dialog.trust_browser.isChecked()
+        assert not dialog.trust_browser.isEnabled()
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
 
 
@@ -58,11 +59,12 @@ def test_gui_saves_credentials_to_vault_and_only_reference_to_sqlite(qt,tmp_path
     import app.gui.browser_controls as module
     stored={}
     vault=SimpleNamespace(put=lambda key,credential:stored.update({key:credential}),
-                          get=lambda key:stored[key],delete=lambda key:stored.pop(key))
+                          cached=lambda key:stored.get(key),is_temporary=lambda key:False,
+                          delete=lambda key:stored.pop(key))
     monkeypatch.setattr(module,'CredentialVault',lambda:vault)
     def accept(dialog):
         dialog.account.setText('fixture@example.invalid');dialog.password.setText('Test-Only-Secret')
-        dialog.auto_login.click();dialog.trust_browser.click()
+        dialog.auto_login.setChecked(True);dialog.trust_browser.setChecked(True);dialog.persist.setChecked(True)
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(AccountDialog,'exec',accept)
     window=MainWindow(tmp_path)
@@ -77,6 +79,61 @@ def test_gui_saves_credentials_to_vault_and_only_reference_to_sqlite(qt,tmp_path
         assert 'Test-Only-Secret' not in window.redactor.clean('Test-Only-Secret')
         first=window.config.credential_id;window.configure_account()
         assert window.config.credential_id!=first and first not in stored and len(stored)==1
+    finally:window.shutdown();window.close();window.deleteLater();qt.processEvents()
+
+
+def test_direct_account_entry_never_reads_native_storage_and_session_reference_is_not_saved(qt,tmp_path,monkeypatch):
+    from app.security.vault import CredentialVault
+    import app.security.vault as vaults
+    monkeypatch.setattr(vaults,'credential_backend',lambda:pytest.fail('Session entry must not open secure storage'))
+    def accept(dialog):
+        dialog.account.setText('session@example.invalid');dialog.password.setText('Session-Only-Test-Secret')
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(AccountDialog,'exec',accept)
+    window=MainWindow(tmp_path)
+    reference=''
+    try:
+        window.configure_account();reference=window.config.credential_id
+        assert CredentialVault.is_temporary(reference)
+        assert CredentialVault().get(reference).password=='Session-Only-Test-Secret'
+        assert window.config.auto_login and window.config.trust_browser
+        window.save()
+        stored=window.repo.load_config()
+        assert not stored.credential_id and not stored.auto_login and not stored.trust_browser
+        with window.repo.connect() as db:raw=db.execute('SELECT data FROM config').fetchone()[0]
+        assert reference not in raw and 'Session-Only-Test-Secret' not in raw and 'session@example.invalid' not in raw
+        assert '无需安全存储密码' in window.account_status.text()
+    finally:
+        if reference:CredentialVault.forget(reference)
+        window.shutdown();window.close();window.deleteLater();qt.processEvents()
+
+
+def test_opening_account_editor_does_not_unlock_an_existing_uncached_account(qt,tmp_path,monkeypatch):
+    from uuid import uuid4
+    from app.security.vault import CredentialVault
+    monkeypatch.setattr(CredentialVault,'get',lambda *_:pytest.fail('Opening an editor must not unlock credentials'))
+    monkeypatch.setattr(AccountDialog,'exec',lambda dialog:QDialog.DialogCode.Rejected)
+    window=MainWindow(tmp_path)
+    try:
+        window.config.credential_id=str(uuid4());window.config.auto_login=True
+        window.configure_account()
+        assert window.config.credential_id
+    finally:window.shutdown();window.close();window.deleteLater();qt.processEvents()
+
+
+def test_gui_chooses_published_sku_without_a_link_input(qt,tmp_path):
+    window=MainWindow(tmp_path)
+    try:
+        window.name.setCurrentIndex(window.name.findText('iPhone Duo'))
+        choices=window.product_choices
+        color=choices.controls['dimensionColor'];color.setCurrentIndex(color.findData('nightsky'))
+        capacity=choices.controls['dimensionCapacity'];capacity.setCurrentIndex(capacity.findData('512gb'))
+        config=window.collect()
+        assert config.product.url=='https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2q4ch/a'
+        assert config.product.max_total=='17999.00' and 'SKU 直达' in choices.note.text()
+        assert window.url.isHidden()
+        choices.offer['variants']=[]
+        assert window.collect().product.url=='https://www.apple.com.cn/shop/buy-iphone/iphone-duo'
     finally:window.shutdown();window.close();window.deleteLater();qt.processEvents()
 
 

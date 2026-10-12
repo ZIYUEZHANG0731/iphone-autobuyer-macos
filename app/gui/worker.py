@@ -30,6 +30,7 @@ from app.services.signin import SignInController
 from app.services.login import apple_auth_url, shop_signin_url, session_page_url
 from app.services.network_diagnosis import NetworkDiagnosis
 from app.platforms import system_label, vault_label
+from app.utils.files import write_private_json
 
 
 class Worker(QThread):
@@ -96,6 +97,14 @@ class Worker(QThread):
         if kind == 'stores':
             changes=Repository(self.root/'autobuyer.sqlite3').observe_stores(self.config.product,data)
             self.data.emit('stock_changes',changes)
+        if kind=='checkout_page':
+            # Only public fulfillment choices, never a checkout DOM/body or
+            # identity/payment values. This stays outside the source tree.
+            write_private_json(self.root/'checkout-diagnostic.json',data if data['stage']=='pickup' else
+                {k:data[k] for k in ('stage','contact_fields','continuation_buttons')})
+        if kind=='checkout_observation':
+            # Known field titles/button categories only; no field values or DOM dump.
+            write_private_json(self.root/'checkout-diagnostic.json',data)
         self.data.emit(kind, data)
 
     async def environment(self):
@@ -205,6 +214,8 @@ class Worker(QThread):
         mode = Mode.LIVE if self.action == 'live' else Mode.WEBSITE_DRY_RUN
         if self.action in ('website', 'live'):
             self.review_data = {}
+            if self.config.profile_id and self.config.transmit_identity:
+                self.status('正在读取本机安全存储中的取货资料；若系统显示安全存储提示，请在系统窗口允许读取')
             identity = IdentityVault().get(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
             if identity:
                 repo.redactor.register(identity)

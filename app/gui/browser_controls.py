@@ -6,7 +6,7 @@ from app.gui.account import AccountDialog
 from app.models.flow import FlowError
 from app.models.config import ConfigError
 from app.platforms import vault_label
-from app.security.vault import CredentialVault
+from app.security.vault import CredentialVault, settings_for_disk
 from app.services.daily_chrome import EXTENSION_URL
 
 
@@ -14,10 +14,10 @@ class BrowserControls:
     def build_browser(self):
         page=QWidget();self.browser_layout=QVBoxLayout(page);self.browser_layout.setContentsMargins(24,18,24,16);self.browser_layout.setSpacing(12)
         self.label(self.browser_layout,'官网浏览器','title')
-        self.browser_hint=self.label(self.browser_layout,'提前保存账户并完成首次验证，购买时沿用同一浏览器。验证码仍在官网页面填写。','muted')
+        self.browser_hint=self.label(self.browser_layout,'直接填写 Apple 账号密码并提前完成首次验证，购买时沿用同一浏览器。验证码仍在官网页面填写。','muted')
         account_row=QHBoxLayout()
         self.account_status=QLabel();self.account_status.setObjectName('muted');account_row.addWidget(self.account_status,1)
-        self.account_button=self.button(account_row,'保存 Apple 账户…',self.configure_account)
+        self.account_button=self.button(account_row,'填写 Apple 账号密码…',self.configure_account)
         self.remove_account_button=self.button(account_row,'删除保存账号',self.remove_account)
         self.browser_layout.addLayout(account_row)
         row=QHBoxLayout();self.button(row,'内置浏览器登录',self.login_embedded,'primary');self.button(row,'独立 Chrome 登录',self.login_chrome);row.addStretch();self.browser_layout.addLayout(row)
@@ -33,27 +33,36 @@ class BrowserControls:
 
     def update_account_status(self):
         saved=bool(self.config.credential_id)
-        self.account_status.setText(f'已保存到{vault_label()} · '+('自动登录已开启' if self.config.auto_login else '自动登录未开启')+(' · 已预选信任此浏览器' if self.config.auto_login and self.config.trust_browser else '') if saved else '尚未保存 Apple 账户')
-        self.account_button.setText('管理 Apple 账户…' if saved else '保存 Apple 账户…')
+        temporary=CredentialVault().is_temporary(self.config.credential_id)
+        location='本次使用 · 无需安全存储密码' if temporary else f'已保存到{vault_label()}'
+        self.account_status.setText(location+' · '+('自动登录已开启' if self.config.auto_login else '自动登录未开启')+(' · 已预选信任此浏览器' if self.config.auto_login and self.config.trust_browser else '') if saved else '尚未填写 Apple 账户')
+        self.account_button.setText('管理 Apple 账户…' if saved else '填写 Apple 账号密码…')
+        self.remove_account_button.setText('清除本次账号' if temporary else '删除保存账号')
         self.remove_account_button.setEnabled(saved)
 
     def configure_account(self):
         if self.worker and self.worker.isRunning() and not self.worker.idle:
             self.message_label.setText('请先停止当前任务，再修改保存的 Apple 账户。');return
         try:
-            vault=CredentialVault();previous=vault.get(self.config.credential_id) if self.config.credential_id else None
-            dialog=AccountDialog(self,credential=previous,auto_login=self.config.auto_login,trust_browser=self.config.trust_browser)
+            vault=CredentialVault();previous=vault.cached(self.config.credential_id) if self.config.credential_id else None
+            dialog=AccountDialog(self,credential=previous,auto_login=self.config.auto_login if self.config.credential_id else True,
+                                 trust_browser=self.config.trust_browser if self.config.credential_id else True,
+                                 persist=bool(previous and not vault.is_temporary(self.config.credential_id)))
             try:
                 if dialog.exec()!=QDialog.DialogCode.Accepted:return
                 credential=dialog.credential();new_id=str(uuid4());old_id=self.config.credential_id
-                vault.put(new_id,credential)
+                persisted=dialog.persist.isChecked()
+                if persisted:vault.put(new_id,credential)
+                else:
+                    previous_settings=settings_for_disk(self.config)
+                    vault.remember(new_id,credential,fallback={k:previous_settings[k] for k in ('credential_id','auto_login','trust_browser')})
                 updated=deepcopy(self.config);updated.credential_id=new_id;updated.auto_login=dialog.auto_login.isChecked();updated.trust_browser=updated.auto_login and dialog.trust_browser.isChecked()
                 try:self.repo.save_config(updated)
                 except Exception:
                     vault.delete(new_id);raise
                 self.config=updated;self.redactor.register(credential);self.update_account_status()
-                self.message_label.setText(f'Apple 账户已保存到本机{vault_label()}。请提前登录并完成首次验证。')
-                if old_id:vault.delete(old_id)
+                self.message_label.setText((f'Apple 账户已保存到本机{vault_label()}。' if persisted else '账号密码本次可用，无需额外授权密码；退出软件后清除。')+'请提前登录并完成首次验证。')
+                if old_id and (persisted or vault.is_temporary(old_id)):vault.delete(old_id)
             finally:
                 dialog.password.clear();dialog.previous=None;dialog.deleteLater()
         except (FlowError,ConfigError) as exc:QMessageBox.information(self,'Apple 账户',str(exc))
@@ -62,6 +71,12 @@ class BrowserControls:
         if self.worker and self.worker.isRunning() and not self.worker.idle:
             self.message_label.setText('请先停止当前任务，再删除保存的 Apple 账户。');return
         if not self.config.credential_id:return
+        if CredentialVault.is_temporary(self.config.credential_id):
+            saved=settings_for_disk(self.config)
+            CredentialVault().delete(self.config.credential_id)
+            self.config.credential_id=saved['credential_id'];self.config.auto_login=saved['auto_login'];self.config.trust_browser=saved['trust_browser']
+            self.repo.save_config(self.config);self.update_account_status()
+            self.message_label.setText('本次输入的账号密码已清除。');return
         if QMessageBox.question(self,'删除保存账号',f'删除本机{vault_label()}中的 Apple 账户和密码？浏览器里的现有登录仍然保留。',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:return
         try:
             self.config.auto_login=False;self.config.trust_browser=False;self.repo.save_config(self.config)

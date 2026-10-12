@@ -117,9 +117,9 @@ async def test_saved_choices_survive_restart_and_accept_the_known_notice_without
 
 @pytest.mark.parametrize('policy,transfer,version',[
     (False,False,NOTICE_VERSION),(True,False,NOTICE_VERSION),
-    (False,True,NOTICE_VERSION),(True,True,'older-notice'),(True,True,''),
+    (False,True,NOTICE_VERSION),
 ])
-async def test_both_saved_choices_and_the_displayed_notice_version_are_required(consent_page,policy,transfer,version):
+async def test_explicitly_disabling_either_privacy_choice_stops_automatic_consent(consent_page,policy,transfer,version):
     page=consent_page;await page.set_content(SAVED_NOTICE_HTML)
     adapter=AppleAdapter(page,Control(False))
     adapter.privacy_config=Settings(privacy_policy_accepted=policy,privacy_transfer_acknowledged=transfer,
@@ -130,13 +130,10 @@ async def test_both_saved_choices_and_the_displayed_notice_version_are_required(
 
 
 @pytest.mark.parametrize('html',[
-    SAVED_NOTICE_HTML.replace(NOTICE_INTRO[1],'新的法律声明内容。'),
     SAVED_NOTICE_HTML.replace(NOTICE_CHOICES[1],NOTICE_CHOICES[1]+'额外授权。'),
-    SAVED_NOTICE_HTML.replace('<button','<p>新增的一项条款。</p><button'),
     SAVED_NOTICE_HTML.replace('<button','<label><input type="checkbox">额外同意事项</label><button'),
-    SAVED_NOTICE_HTML.replace('<script>','<p>声明后新增的一项条款。</p><script>'),
 ])
-async def test_saved_choices_stop_for_changed_or_added_terms(consent_page,html):
+async def test_automatic_privacy_choice_does_not_select_unknown_extra_choices(consent_page,html):
     page=consent_page;await page.set_content(html)
     adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
     with pytest.raises(UserAction):await adapter.guard()
@@ -201,12 +198,12 @@ async def test_unchecked_control_failure_does_not_consume_saved_submission(conse
     assert await page.evaluate('window.accepts')==1 and adapter.preconsent_used
 
 
-async def test_mismatch_diagnostic_does_not_report_a_failed_click(consent_page):
-    page=consent_page;await page.set_content(styled_notice().replace(NOTICE_INTRO[1],'新的可见条款。'));events=[]
+async def test_unknown_privacy_choice_diagnostic_does_not_report_a_failed_click(consent_page):
+    page=consent_page;await page.set_content(styled_notice().replace(NOTICE_CHOICES[1],NOTICE_CHOICES[1]+'额外授权。'));events=[]
     adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
     adapter.privacy_config=saved_privacy_settings()
     with pytest.raises(UserAction):await adapter.guard()
-    assert next(d for k,d in events if k=='consent_status')=='官网声明内容与提前同意的版本不同，请查看当前声明'
+    assert next(d for k,d in events if k=='consent_status')=='官网隐私选项结构无法确认，页面已保留；请查看官网提示'
     assert not adapter.preconsent_used and await page.evaluate('window.accepts')==0
 
 
@@ -217,3 +214,52 @@ async def test_background_checkout_checkbox_is_not_part_of_notice_or_automatical
     await adapter.guard()
     assert await page.evaluate('window.accepts')==1
     assert not await page.locator('#outside').is_checked()
+
+
+async def test_actual_apple_link_hint_and_current_intro_preserve_saved_choice(consent_page):
+    # Copied public wording from the actual 2026-10-12 checkout UI, rather than
+    # assuming that an external link's accessibility hint is part of the terms.
+    html=styled_notice().replace(NOTICE_CHOICES[0],
+        '我同意<a href="https://www.apple.com.cn/legal/privacy/">Apple 的隐私政策 '
+        '<span>(在新窗口中打开)</span></a>').replace(NOTICE_MORE,
+        '我们提供包括 Apple 隐私政策在内的更多信息。进一步了解Apple 隐私政策(在新窗口中打开)。')
+    page=consent_page;await page.set_content(html);events=[]
+    adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    adapter.privacy_config=saved_privacy_settings()
+    # Existing saved choices from v0.7.0 must not be silently discarded.
+    assert NOTICE_VERSION=='367ecee9ba9fa0016c563f7b8b0cb97cf45de7c403c81d05a51e555ccb086292'
+    await adapter.guard()
+    assert await page.evaluate('window.accepts')==1
+    assert not any(k=='consent_required' for k,d in events)
+
+
+async def test_automatic_privacy_choice_is_not_blocked_by_the_notice_paragraph_version(consent_page):
+    page=consent_page;html=styled_notice().replace('所必要的数据','所必需的数据')
+    adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
+    await page.set_content(html);await adapter.guard()
+    assert await page.evaluate('window.accepts')==1
+    adapter=AppleAdapter(page,Control(False));adapter.privacy_config=saved_privacy_settings()
+    await page.set_content(html.replace('开展服务运营和改进用户体验','开展广告营销和改进用户体验'))
+    await adapter.guard()
+    assert await page.evaluate('window.accepts')==1
+
+
+@pytest.mark.parametrize('version',['','older-notice'])
+async def test_default_privacy_consent_does_not_require_saving_a_version_first(consent_page,version):
+    page=consent_page;await page.set_content(styled_notice());events=[]
+    adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    adapter.privacy_config=Settings(privacy_notice_version=version)
+    await adapter.guard()
+    assert await page.evaluate('window.accepts')==1
+    assert not any(k=='consent_required' for k,d in events)
+
+
+async def test_resuming_without_consent_republishes_the_current_gui_entry(consent_page):
+    page=consent_page;events=[]
+    adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    for _ in range(2):
+        with pytest.raises(UserAction):await adapter.guard()
+        adapter.control.resume()
+    notices=[d for k,d in events if k=='consent_required']
+    assert len(notices)==2 and notices[0]['key']==notices[1]['key']
+    assert await page.evaluate('window.accepts')==0

@@ -2,6 +2,7 @@ from copy import deepcopy
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QFormLayout, QComboBox, QSpinBox, QLabel
 from app.services.catalog import OPTION_TITLES, quoted_total
+from app.services.sku import selected_variant
 
 
 class ProductChoices(QWidget):
@@ -72,9 +73,17 @@ class ProductChoices(QWidget):
         if any(not combo.currentData() for combo in self.controls.values()):return '0.00'
         return quoted_total(self.offer,self.selected_options(),self.quantity.value())
 
+    def selected_url(self):
+        variant=selected_variant(self.offer,self.selected_options())
+        return variant['url'] if variant else self.offer.get('url','')
+
     def update_price(self):
         total=self.total()
         self.price.setText(f'官网公布价格：RMB {float(total):,.2f}' if float(total)>0 else '官网价格：选择配置后显示；结账前会核对')
+        variant=selected_variant(self.offer,self.selected_options())
+        notice=self.offer.get('preorder_note','')
+        self.note.setText('\n'.join(s for s in (notice,'已准备官网 SKU 直达链接。' if variant else
+            '选好配置后，软件自动匹配官网购买入口。') if s))
 
     def missing_choices(self):
         return [combo.accessibleName() for combo in self.controls.values() if not combo.currentData()]

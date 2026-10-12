@@ -20,6 +20,7 @@ from app.models.flow import FlowError
 from app.services.storage import Repository
 from app.services.simulation import SCENARIOS
 from app.security.privacy import Redactor
+from app.security.vault import settings_for_disk
 from app.gui.worker import Worker
 from app.gui.browser_controls import BrowserControls
 from app.gui.profiles import ProfileControls, ProfileDialog
@@ -150,16 +151,16 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.label(c,'自动提交目前只支持招商银行 24 期；官网缺少最终门店信息时，仍会请你核对。','muted')
         self.label(c,'官网模拟下单会在最终核对时停止。','muted');row.addWidget(frame,1);l.addLayout(row)
         frame,c=self.card();c.addLayout(section_header('Apple 隐私声明 · 提前同意'));c.addWidget(divider())
-        self.label(c,'开售前勾选下面两项并保存，遇到相同声明时自动同意并继续。','muted')
+        self.label(c,'默认自动勾选 Apple 中国大陆结账的两个隐私选项并继续，不弹出二次确认窗口。','muted')
         self.label(c,NOTICE_TITLE,'eyebrow')
         self.label(c,'\n'.join(NOTICE_INTRO),'muted')
         self.privacy_policy=QCheckBox(NOTICE_CHOICES[0]);self.privacy_policy.setAccessibleName(NOTICE_CHOICES[0]);c.addWidget(self.privacy_policy)
         self.privacy_transfer=QCheckBox('\n'.join(textwrap.wrap(NOTICE_CHOICES[1],width=54)))
         self.privacy_transfer.setAccessibleName(NOTICE_CHOICES[1]);self.privacy_transfer.setMinimumHeight(44);c.addWidget(self.privacy_transfer)
         policy_link=QLabel(f'<a href="{PRIVACY_POLICY_URL}">查看 Apple 隐私政策 ↗</a>');policy_link.setOpenExternalLinks(True);c.addWidget(policy_link)
-        self.label(c,'保存后重启仍有效。官网声明内容变化时暂停，让你查看新内容。','muted')
+        self.label(c,'默认已启用，重启仍有效；取消任一项可关闭自动同意。','muted')
         self.consent_status=self.label(c,'当前没有待确认的官网协议。','muted')
-        self.consent_entry=self.button(c,'查看并确认当前协议',self.open_consent);self.consent_entry.setEnabled(False);l.addWidget(frame)
+        self.consent_entry=self.button(c,'查看官网页面',self.focus_browser);self.consent_entry.setEnabled(False);self.consent_entry.hide();l.addWidget(frame)
         l.addStretch();row=QHBoxLayout();row.addStretch();self.button(row,'创建新的购买计划',self.new_plan);self.button(row,'保存付款与授权',self.save,'primary');l.addLayout(row)
 
     def build_console(self):
@@ -225,7 +226,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         work.addWidget(right,3);l.addLayout(work);l.addWidget(divider())
 
         row=QHBoxLayout();self.label(row,'运行日志','sectionTitle');row.addStretch()
-        self.console_consent_entry=self.button(row,'官网隐私确认…',self.open_consent);self.console_consent_entry.hide()
+        self.console_consent_entry=self.button(row,'查看官网页面',self.focus_browser);self.console_consent_entry.hide()
         self.resume_button=self.button(row,'继续检查',self.resume);self.resume_button.setEnabled(False)
         self.stop_button=self.button(row,'停止任务',self.stop,'danger');self.stop_button.setEnabled(False);l.addLayout(row)
         self.progressbar=QProgressBar();self.progressbar.setRange(0,12);self.progressbar.setValue(0);self.progressbar.setTextVisible(False);self.progressbar.hide()
@@ -296,9 +297,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.checkout_strategy.setCurrentIndex(self.checkout_strategy.findData(self.config.checkout_strategy))
         self.browser_kind.setCurrentIndex(self.browser_kind.findData(self.config.browser_kind))
         self.payment_choices.populate(self.config.payments,self.config.installment_months);self.auto.setChecked(self.config.auto_submit);self.transmit.setChecked(self.config.transmit_identity);self.interval.setValue(max(10,self.config.interval));self.wait.setValue(int(self.config.max_wait/60))
-        known_notice=self.config.privacy_notice_version==NOTICE_VERSION
-        self.privacy_policy.setChecked(known_notice and self.config.privacy_policy_accepted)
-        self.privacy_transfer.setChecked(known_notice and self.config.privacy_transfer_acknowledged)
+        self.privacy_policy.setChecked(self.config.privacy_policy_accepted)
+        self.privacy_transfer.setChecked(self.config.privacy_transfer_acknowledged)
         self.editor_timezone=self.current_zone()
         self.schedule_enabled.setChecked(bool(self.config.starts_at))
         if self.config.starts_at:
@@ -311,7 +311,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         item=QListWidgetItem(f'{store.name}  ·  {store.city}');item.setData(Qt.ItemDataRole.UserRole,store);item.setFlags(item.flags()|Qt.ItemFlag.ItemIsUserCheckable|Qt.ItemFlag.ItemIsDragEnabled);item.setCheckState(Qt.CheckState.Checked if store.enabled else Qt.CheckState.Unchecked);self.store_list.addItem(item)
     def collect(self):
         c=deepcopy(self.config);options=self.product_choices.selected_options()
-        c.product=Product(self.name.currentText().strip(),self.url.text().strip(),options,self.quantity.value(),self.product_choices.total(),'中国大陆',self.no_trade.isChecked(),self.no_care.isChecked(),price_from_website=True,discover_from_store=True)
+        c.product=Product(self.name.currentText().strip(),self.product_choices.selected_url(),options,self.quantity.value(),self.product_choices.total(),'中国大陆',self.no_trade.isChecked(),self.no_care.isChecked(),price_from_website=True,discover_from_store=True)
         c.stores=[]
         for row in range(self.store_list.count()):
             item=self.store_list.item(row);store=self.store_directory.enrich(item.data(Qt.ItemDataRole.UserRole));store.enabled=item.checkState()==Qt.CheckState.Checked;c.stores.append(store)
@@ -385,7 +385,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         if row>=0:self.store_list.takeItem(row)
     def export_config(self):
         self.save();path,_=QFileDialog.getSaveFileName(self,'导出非敏感配置','Apple配置.json','JSON (*.json)')
-        if path:Path(path).write_text(json.dumps(self.config.to_dict(),ensure_ascii=False,indent=2),encoding='utf-8')
+        if path:Path(path).write_text(json.dumps(settings_for_disk(self.config),ensure_ascii=False,indent=2),encoding='utf-8')
     def import_config(self):
         path,_=QFileDialog.getOpenFileName(self,'载入配置','','JSON (*.json)')
         if path:
@@ -534,7 +534,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         elif kind=='consent_status':self.console_log.appendPlainText('隐私确认：'+data)
         elif kind=='consent_required':self.show_consent_help(data)
         elif kind=='consent_completed':
-            self.clear_consent();self.console_log.appendPlainText('已按提前保存的选择完成 Apple 隐私确认；继续检查官网结账' if data.get('source')=='saved' else '已按本次选择完成 Apple 隐私确认；继续检查官网结账')
+            self.clear_consent();self.console_log.appendPlainText('已自动完成 Apple 隐私确认；继续检查官网结账')
         elif kind=='browser_focus_error':self.message_label.setText(data)
         elif kind=='embedded_focus':self.showNormal();self.stack.setCurrentIndex(6);self.activateWindow()
         elif kind in ('auth_focus','browser_focus'):
@@ -553,6 +553,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             if data.get('changed'):
                 self.console_log.appendPlainText('检测到本机网络设置变化；登录页与现有会话保留。请在同一官网登录页验证连接结果。')
         elif kind=='checkout_auth':self.console_log.appendPlainText(data['message'])
+        elif kind=='checkout_pickup':self.console_log.appendPlainText(data['message']+'：'+data['store'])
+        elif kind=='checkout_page':
+            stage={'loading':'正在加载','guest':'账户或游客入口','consent':'隐私声明','pickup':'取货门店',
+                   'contact':'取货资料','payment':'付款方式'}.get(data['stage'],'正在加载')
+            self.console_log.appendPlainText('官网结账：'+stage)
         elif kind=='verification_required':
             self.message_label.setText(data['message']);self.tray.showMessage('需要 Apple 账户验证' if data.get('kind')=='apple_account' else '需要手机验证',data['message'],QSystemTrayIcon.MessageIcon.Information,10000)
         elif kind=='product_link':
@@ -602,41 +607,20 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         active=bool(self.pending_consent and self.worker and self.worker.isRunning() and not self.worker.idle
                     and self.last_state=='PAUSED' and not self.worker.control.cancel_event.is_set()
                     and not self.worker.control.stop_event.is_set())
-        self.consent_entry.setEnabled(active);self.console_consent_entry.setVisible(active)
+        self.consent_entry.setEnabled(False);self.consent_entry.hide();self.console_consent_entry.hide()
         saved=self.privacy_policy.isChecked() and self.privacy_transfer.isChecked()
-        self.consent_status.setText(self.pending_consent.get('reason','当前官网声明需重新确认，请查看内容。') if active else '两项已勾选；保存后自动处理相同声明。' if saved else '勾选两项并保存，即可提前完成这份声明的同意。')
-
-    def open_consent(self):
-        self.update_consent_entry()
-        if self.consent_entry.isEnabled():self.show_consent_help(self.pending_consent)
+        persisted=saved and self.config.privacy_policy_accepted and self.config.privacy_transfer_acknowledged
+        self.consent_status.setText(self.pending_consent.get('reason','当前官网声明需重新确认，请查看内容。') if active else
+            'Apple 结账隐私声明自动同意已启用，不再弹出确认窗口。' if persisted else
+            '两项已勾选；保存或开始试跑后生效。' if saved else
+            '勾选两项并保存，即可提前完成这份声明的同意。')
 
     def show_consent_help(self,data=None):
-        data=data or {};key=data.get('key','')
+        data=data or {}
         self.pending_consent=dict(data);self.update_consent_entry()
-        if self.consent_dialog and self.consent_dialog.isVisible() and self.consent_dialog.property('consent_key')==key:return
-        if self.consent_dialog:self.consent_dialog.close()
-        worker=self.worker
-        dialog=QDialog(self);dialog.setWindowTitle('官网隐私确认');dialog.resize(490,280);dialog.setProperty('consent_key',key)
-        l=QVBoxLayout(dialog);self.label(l,'Apple 数据隐私知情同意书','sectionTitle')
-        if key and len(data.get('choices',[]))==2:
-            self.label(l,data['scope'],'muted');self.label(l,data['details'],'muted')
-            self.button(l,'在官网查看协议',self.focus_browser,'link')
-            choices=[]
-            for label in data['choices']:
-                check=QCheckBox('\n'.join(textwrap.wrap(label,width=30)));check.setAccessibleName(label);check.setMinimumHeight(48)
-                check.setStyleSheet('QCheckBox { spacing: 8px; }');l.addWidget(check);choices.append(check)
-            self.label(l,'点击确认仅接受当前页面的这份协议，本次任务使用一次。','muted')
-            def accept_current():
-                if self.worker is worker and worker and worker.isRunning() and not worker.idle and self.last_state=='PAUSED' and time.monotonic()>=self.cooldown_until and all(c.isChecked() for c in choices):
-                    worker.control.approve_consent(key);worker.control.resume();dialog.accept()
-            accept=self.button(l,'本次同意并继续',accept_current,'primary');accept.setEnabled(False)
-            for check in choices:check.toggled.connect(lambda _,button=accept,checks=choices:button.setEnabled(all(c.isChecked() for c in checks)))
-        else:
-            self.label(l,'请在软件浏览器查看官网协议，并在官网作出选择。完成后点下面的按钮，软件会重新检查页面。','muted')
-        row=QHBoxLayout();self.button(row,'暂不继续',dialog.reject)
-        def completed():
-            self.resume();dialog.accept()
-        self.button(row,'已在官网处理，继续检查',completed,'primary');l.addLayout(row);self.consent_dialog=dialog;dialog.show()
+        # An unrecognized/disabled control is a browser diagnostic, not a second
+        # legal-confirmation dialog. Normal checkout consent runs automatically.
+        self.message_label.setText(data.get('reason','官网隐私控件尚未就绪，页面已保留。'))
 
     def focus_browser(self):
         if self.worker and self.worker.isRunning() and self.worker.session_open:

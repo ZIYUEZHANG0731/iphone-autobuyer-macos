@@ -7,15 +7,15 @@ from app.platforms import vault_label
 
 
 class AccountDialog(QDialog):
-    def __init__(self, parent=None, *, credential=None, auto_login=False, trust_browser=False):
+    def __init__(self, parent=None, *, credential=None, auto_login=True, trust_browser=True, persist=False):
         super().__init__(parent)
         self.previous = credential
-        self.setWindowTitle('保存 Apple 账户')
-        self.resize(510, 350)
+        self.setWindowTitle('Apple 账户')
+        self.resize(510, 390)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(14)
-        note = QLabel(f'账号和密码仅保存到本机{vault_label()}，用于 Apple 官网登录。')
+        note = QLabel('直接输入账号密码即可使用，无需另外设置授权密码。\n默认仅本次打开软件有效。')
         note.setWordWrap(True)
         note.setObjectName('muted')
         layout.addWidget(note)
@@ -39,12 +39,15 @@ class AccountDialog(QDialog):
         self.auto_login.toggled.connect(self.trust_browser.setEnabled)
         layout.addWidget(self.auto_login)
         layout.addWidget(self.trust_browser)
+        self.persist = QCheckBox(f'重启后保留（保存到{vault_label()}）')
+        self.persist.setChecked(persist)
+        layout.addWidget(self.persist)
         help_text = QLabel('请提前在同一浏览器完成首次验证。Apple 仍可能再次要求验证码；\n软件会保留当前页面并提醒你，不会反复提交密码。')
         help_text.setWordWrap(True)
         help_text.setObjectName('muted')
         layout.addWidget(help_text)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText('保存到安全存储')
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText('使用此账户')
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         buttons.accepted.connect(self.accept_checked)
         buttons.rejected.connect(self.reject)

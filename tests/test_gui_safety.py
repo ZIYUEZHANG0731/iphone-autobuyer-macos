@@ -123,49 +123,34 @@ def test_rate_limit_disables_resume_and_new_browsing_until_deadline(qt,tmp_path,
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
 
 
-def test_consent_choice_requires_both_boxes_and_only_approves_active_task(qt,tmp_path):
-    from PySide6.QtWidgets import QCheckBox,QPushButton
+def test_default_checkout_privacy_does_not_open_a_second_confirmation_window(qt,tmp_path):
     window=MainWindow(tmp_path);control=Control(False)
     window.worker=SimpleNamespace(isRunning=lambda:True,idle=False,control=control,session_open=True)
     window.last_state='PAUSED'
     data={'key':'offline-current-page','scope':'secure.www.apple.com.cn','details':'离线协议正文',
           'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
     try:
+        assert window.privacy_policy.isChecked() and window.privacy_transfer.isChecked()
         window.show_consent_help(data)
-        checks=window.consent_dialog.findChildren(QCheckBox)
-        button=next(b for b in window.consent_dialog.findChildren(QPushButton) if b.text()=='本次同意并继续')
-        assert len(checks)==2 and not button.isEnabled() and control.consent_approval is None
-        checks[0].setChecked(True);assert not button.isEnabled()
-        checks[1].setChecked(True);assert button.isEnabled()
-        button.click()
-        assert control.resume_event.is_set() and control.consume_consent(data['key'])
-        assert not control.consume_consent(data['key'])
+        assert window.consent_dialog is None and control.consent_approval is None
+        assert window.consent_entry.isHidden() and window.console_consent_entry.isHidden()
+        assert not window.consent_entry.isEnabled()
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
 
 
-def test_current_consent_can_be_reopened_from_payment_and_console_entries(qt,tmp_path,monkeypatch):
-    from PySide6.QtWidgets import QCheckBox,QPushButton
+def test_unrecognized_privacy_controls_are_diagnostics_without_a_modal(qt,tmp_path,monkeypatch):
     window=MainWindow(tmp_path);control=Control(False)
     window.worker=SimpleNamespace(isRunning=lambda:True,idle=False,control=control,session_open=True)
     monkeypatch.setattr(window.tray,'showMessage',lambda *_:None)
-    data={'key':'offline-reopen-page','scope':'secure.www.apple.com.cn','details':'当前离线协议正文',
-          'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
+    data={'reason':'官网隐私选项结构无法确认，页面已保留；请查看官网提示'}
     try:
-        assert not window.consent_entry.isEnabled()
         window.on_data('consent_required',data)
-        window.on_event({'state':'PAUSED','message':'当前协议待确认'})
-        assert window.consent_entry.isEnabled() and not window.console_consent_entry.isHidden()
-        original=window.consent_dialog;original.reject()
-        window.consent_entry.click()
-        assert window.consent_dialog is not original and window.consent_dialog.isVisible()
-        assert not any(c.isChecked() for c in window.consent_dialog.findChildren(QCheckBox))
-        assert not next(b for b in window.consent_dialog.findChildren(QPushButton) if b.text()=='本次同意并继续').isEnabled()
-        assert control.consent_approval is None
-        window.consent_dialog.reject();window.console_consent_entry.click()
-        assert window.consent_dialog.isVisible() and window.pending_consent['key']==data['key']
+        window.on_event({'state':'PAUSED','message':data['reason']})
+        assert window.consent_dialog is None
+        assert window.consent_entry.isHidden() and window.console_consent_entry.isHidden()
+        assert not window.consent_entry.isEnabled() and control.consent_approval is None
         window.on_event({'state':'CUSTOMER_INFO_FILLED','message':'继续到取货信息'})
-        assert window.pending_consent is None and not window.consent_entry.isEnabled()
-        assert window.console_consent_entry.isHidden() and not window.consent_dialog.isVisible()
+        assert window.pending_consent is None
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
 
 
@@ -177,10 +162,10 @@ def test_new_task_and_cancel_remove_stale_consent_entries(qt,tmp_path):
     data={'key':'offline-cancel-page','scope':'secure.www.apple.com.cn','details':'当前离线协议正文',
           'choices':['我同意Apple 的隐私政策','我了解，有限的个人信息可能会在中国境外存储和处理。']}
     try:
-        window.show_consent_help(data);assert window.consent_entry.isEnabled()
+        window.show_consent_help(data);assert window.consent_entry.isHidden()
         window.stop()
         assert window.pending_consent is None and not window.consent_entry.isEnabled()
-        assert not window.consent_dialog.isVisible() and control.consent_approval is None
+        assert window.consent_dialog is None and control.consent_approval is None
         control.reset_task();window.show_consent_help(data)
         window.on_event({'state':'PREPARING','message':'新任务'})
         assert window.pending_consent is None and not window.consent_entry.isEnabled()
@@ -191,7 +176,7 @@ def test_privacy_can_be_selected_before_checkout_and_survives_reopening_the_app(
     from app.services.consent import NOTICE_VERSION
     window=MainWindow(tmp_path)
     try:
-        assert not window.privacy_policy.isChecked() and not window.privacy_transfer.isChecked()
+        assert window.privacy_policy.isChecked() and window.privacy_transfer.isChecked()
         window.privacy_policy.setChecked(True);window.privacy_transfer.setChecked(True);window.save()
         saved=window.repo.load_config()
         assert saved.privacy_policy_accepted and saved.privacy_transfer_acknowledged
@@ -202,6 +187,8 @@ def test_privacy_can_be_selected_before_checkout_and_survives_reopening_the_app(
     try:
         assert reopened.privacy_policy.isChecked() and reopened.privacy_transfer.isChecked()
         assert not reopened.consent_entry.isEnabled()
+        assert reopened.consent_entry.isHidden()
+        assert '自动同意已启用' in reopened.consent_status.text()
         reopened.privacy_transfer.setChecked(False);reopened.save()
         assert not reopened.repo.load_config().privacy_transfer_acknowledged
     finally:reopened.close();reopened.deleteLater();qt.processEvents()
@@ -244,7 +231,7 @@ def test_click_only_product_payment_and_authorization_preserve_saved_preferences
         assert config.product.name=='iPhone 18 Pro Max'
         assert config.product.options=={'dimensionScreensize':'6_9inch','dimensionColor':'black','dimensionCapacity':'512gb'}
         assert config.product.max_total=='12999.00'
-        assert config.product.url=='https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro'
+        assert config.product.url=='https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjya4ch/a'
         choice.replace_offers([o for o in choice.offers if o['name']=='iPhone Duo'])
         assert choice.model.currentText()=='iPhone 18 Pro Max'
         assert choice.selected_options()==config.product.options
@@ -300,6 +287,7 @@ def test_directory_can_select_stores_before_duo_has_a_link_and_preserves_each_ci
     window=MainWindow(tmp_path)
     try:
         window.config.product.name='iPhone Duo';window.config.product.url='';window.url.clear()
+        window.product_choices.offer['url']='';window.product_choices.offer['variants']=[]
         window.store_list.clear()
         assert window.available_stores.rowCount()==49 and not window.store_results
         for name in ('Apple 南京东路','Apple 三里屯'):

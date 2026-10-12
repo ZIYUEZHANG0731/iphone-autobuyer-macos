@@ -16,16 +16,18 @@ from app.services.payment import PaymentStore
 from app.services.pricing import quote_key
 from app.services.catalog import exact_product_link,preorder_time
 from app.services.catalog_reader import public_links
+from app.services.sku import family_url
 from app.services.login import (account_page_url, apple_auth_url, shop_signin_url,
                                visible_login_form, session_page_url)
 from app.adapters.apple_login import AppleLogin
 from app.adapters.apple_consent import AppleConsent
 from app.adapters.controls import ensure_checked
+from app.adapters.checkout_state import checkout_state
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
 from copy import deepcopy
 
-# Extract observable DOM controls, never undocumented order APIs or a SKU table.
+# Extract observable DOM controls and verify choices, including SKU landing pages.
 CONTROL_SCRIPT = '''() => {
  const root = document.querySelector('main,[role="main"]') || document.body;
  const readable = n => n ? (n.innerText?.trim() || n.getAttribute('aria-label') || n.getAttribute('alt') || Array.from(n.querySelectorAll('img[alt]')).map(i=>i.alt).join(' ')) : '';
@@ -82,6 +84,9 @@ class AppleAdapter(AppleLogin, AppleConsent):
         self.store_directory=StoreDirectory()
         self.stock_region=None
         self.guest_attempted=False
+        self.pickup_continue_attempted=False
+        self.checkout_more_attempted=False
+        self.checkout_observed_stage=None
         self.login_config=login_config
         self.credential_provider=credential_provider
         self.sign_in=sign_in or SignInController()
@@ -186,7 +191,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
         if not apple_url((page or self.page).url):
             raise UserAction("浏览器已离开 Apple 中国大陆官网；已停止自动填写")
 
-    async def guard(self,page=None,*,allow_uncommitted=False,allow_busy=False):
+    async def guard(self,page=None,*,allow_uncommitted=False,allow_busy=False,text=None):
         self.control.check()
         if getattr(self,'auth_service_status',None):
             raise UserAction('Apple 认证请求返回 HTTP 503，暂时无法验证身份；保留当前页面，不自动重发密码')
@@ -196,7 +201,7 @@ class AppleAdapter(AppleLogin, AppleConsent):
         if not uncommitted:self.origin(page)
         # A visible challenge/refusal still requires user action. Never use a
         # transient HTTP retry to skip it or to resubmit login/checkout forms.
-        text = await page.locator("body").inner_text()
+        if text is None:text = await page.locator("body").inner_text()
         if re.search(r"captcha|验证码.{0,8}(图片|字符)|verify you are human|access denied|访问被拒绝",text,re.I):
             raise UserAction("官网要求安全验证，请在浏览器手动处理后继续")
         if self.http_status in (403,429,541,503):
@@ -223,7 +228,14 @@ class AppleAdapter(AppleLogin, AppleConsent):
         # on every public-store opening check. Checkout navigation is unchanged.
         self.browse_timeout_ms=max(1,min(8000,int(config.operation_timeout*1000)))
         try:
-            await self.page.goto(self.target_url,wait_until="domcontentloaded",timeout=self.browse_timeout_ms)
+            response=await self.page.goto(self.target_url,wait_until="domcontentloaded",timeout=self.browse_timeout_ms)
+            family=family_url(self.target_url)
+            if response and response.status==404 and family and self.target_url.rstrip('/')!=family:
+                # A removed public SKU is recoverable through its published
+                # family page. Explicit traffic restrictions are never retried here.
+                self.target_url=family;config.product.url=family
+                await self.page.goto(family,wait_until='domcontentloaded',timeout=self.browse_timeout_ms)
+                self.progress('product_link',{'name':config.product.name,'url':family})
         except PlaywrightError as exc:
             self.browse_unavailable=True
             self.browse_connection_failed=bool(re.search(r'net::ERR_(CONNECTION_|NAME_NOT_RESOLVED|TIMED_OUT|INTERNET_DISCONNECTED)',str(exc)))
@@ -369,9 +381,15 @@ class AppleAdapter(AppleLogin, AppleConsent):
         await self.guard()
         if self.cart_checked:
             return
+        await self.focus_control(self.page)
         # Product option order is saved in insertion order to preserve dependent selections.
+        choices=await self.options() if config.product.options else []
         for key,value in config.product.options.items():
+            matched=[c for c in choices if c['name']==key and c['value']==value]
+            if len(matched)==1 and matched[0]['kind']=='radio' and matched[0]['checked']:
+                continue
             await self._choice(key,value)
+            choices=await self.options()
         if not config.product.options:
             choices=await self.options()
             if choices:
@@ -698,38 +716,33 @@ class AppleAdapter(AppleLogin, AppleConsent):
             await self._validate_bag(config)
             await self.page.get_by_role('button',name='结账',exact=True).first.click()
             await self._wait_checkout_entry()
-        if config.checkout_strategy!='guest' and config.auto_login:
+        current_stage=(await checkout_state(self.page))['stage']
+        fulfillment_ready=current_stage in ('pickup','contact','payment')
+        if not fulfillment_ready and config.checkout_strategy!='guest' and config.auto_login:
             # Credentials take priority over the explicitly selected guest backup.
             # A rejected/uncertain attempt pauses with the bag intact.
             await self.auto_sign_in(self.page,config)
         guest=self.page.get_by_role('button',name='以游客身份继续',exact=True)
-        if await guest.is_visible():
+        if not fulfillment_ready and await guest.is_visible():
             if config.checkout_strategy=='account_only':
                 raise UserAction('官网要求重新登录；已设置“只用 Apple 账户”，请完成登录后继续。购物袋保留')
             if self.guest_attempted:
                 raise UserAction('游客继续已尝试，官网尚未完成跳转；请查看当前页面，不会反复点击')
             self.guest_attempted=True
+            await self.focus_control(self.page)
             await guest.click()
             self.progress('checkout_auth',{'path':'guest','strategy':config.checkout_strategy,
                 'message':'官网要求登录，已按预选策略进入游客结账；若官网要求手机验证码则暂停'})
-            await self._wait_any(['同意并继续','继续填写取货详情','继续选择付款方式'])
-            await self.guard()
-        elif await visible_login_form(self.page):
+            # Apple opens consent over this page: the background guest button
+            # stays visible. Observe the next stage instead of waiting for it
+            # to disappear, so saved consent can run as soon as it appears.
+        elif not fulfillment_ready and await visible_login_form(self.page):
             raise UserAction('官网需要登录且当前未显示游客入口；请完成登录，不会反复提交账户密码')
-        await self.guard()
-        pickup=self.page.get_by_role('radio',name='我要取货',exact=True)
-        if await pickup.is_visible():
-            await self._check_radio(pickup)
-            target=self.page.get_by_role('radio',name=re.compile(re.escape(self.selected.store.name)))
-            if not await target.count():
-                more=self.page.get_by_role('button',name='显示更多取货地点',exact=True)
-                if await more.is_visible(): await more.click()
-            if await target.count()!=1 or not await target.is_enabled():
-                raise UserAction("结账阶段目标门店已不可用，请手动核对；不会切换为邮寄配送")
-            await self._check_radio(target)
-            await self.page.get_by_role('button',name='继续填写取货详情',exact=True).click()
-            await self.page.get_by_role('textbox',name='姓氏',exact=True).wait_for()
-        if await self.page.get_by_role('button',name='继续选择付款方式',exact=True).is_visible():
+        stage=await self._wait_checkout_stage()
+        if stage=='pickup':
+            await self._select_checkout_pickup(config)
+            stage=await self._wait_checkout_stage(wanted=('contact','payment'),timeout=15)
+        if stage=='contact':
             await self.inspect_customer_fields()
             if self.identity_filled:
                 await self.check_customer_verification()
@@ -755,8 +768,41 @@ class AppleAdapter(AppleLogin, AppleConsent):
             await self.check_customer_verification()
             return
         # Manually completed contact can already have advanced to Payment.
-        if not re.search(r'Payment|Billing',self.page.url) and not await self.page.get_by_role('heading',name=re.compile('付款|支付')).count():
+        if stage!='payment':
             raise UserAction("当前结账阶段无法确认，请在浏览器处理登录或提示后继续")
+
+    async def _select_checkout_pickup(self,config):
+        if not self.selected:raise UserAction('本次任务尚未核对目标取货门店，请重新检查库存')
+        await self.focus_control(self.page)
+        pickup=self.page.get_by_role('radio',name=re.compile(r'^(我要)?取货(?:\s|$)')).filter(visible=True)
+        if await pickup.count()==1:await self._check_radio(pickup)
+        # The fulfillment page can already be in pickup mode with no delivery
+        # toggle. Its continuation control, rather than a fixed toggle label,
+        # identifies that stage. Never choose a different store or shipping.
+        name=re.sub(r'^Apple\s*','',self.selected.store.name).strip()
+        pattern=re.compile(r'^(?:\d+\s+)?(?:Apple\s*)?'+re.escape(name).replace(r'\ ',r'\s*')+r'(?:\s|$)')
+        target=self.page.get_by_role('radio',name=pattern).filter(visible=True)
+        if not await target.count():
+            more=self.page.get_by_role('button',name='显示更多取货地点',exact=True)
+            if await more.is_visible() and not self.checkout_more_attempted:
+                self.checkout_more_attempted=True;await more.click()
+        try:
+            await expect(target).to_have_count(1,timeout=8000)
+            store_id=await target.get_attribute('value')
+            if store_id and self.selected.store.store_id and store_id!=self.selected.store.store_id:
+                raise UserAction('结账门店编号与目标门店不一致，页面已保留；不会选择其他门店')
+            if not await target.is_enabled():raise UserAction('结账阶段目标门店已不可用，请核对；不会切换为邮寄配送')
+            await self._check_radio(target)
+            continuation=self.page.get_by_role('button',name='继续填写取货详情',exact=True)
+            await expect(continuation).to_be_enabled(timeout=8000)
+            if self.pickup_continue_attempted:
+                raise UserAction('取货门店继续已尝试，官网尚未完成跳转；保留页面，不重复提交')
+            self.pickup_continue_attempted=True
+            await continuation.click()
+            self.progress('checkout_pickup',{'store':self.selected.store.name,'message':'已核对结账取货门店，等待取货资料页'})
+        except (AssertionError,PlaywrightError):
+            await self.guard()
+            raise UserAction('官网取货门店尚未就绪或尚未允许继续，请查看门店和取货时间；当前页面保留') from None
 
     async def check_customer_verification(self):
         verify=self.page.get_by_role('button',name='验证',exact=True).filter(visible=True)
@@ -766,9 +812,48 @@ class AppleAdapter(AppleLogin, AppleConsent):
             raise UserAction('已填写并读回取货人字段；官网要求手机验证，请自行点“验证”、输入验证码后点“继续检查”')
 
     async def _wait_checkout_entry(self,timeout=30):
-        await self._wait_any(['以游客身份继续','同意并继续','继续填写取货详情','继续选择付款方式'],
-            timeout, login_entry=True, interval=.1,
-            message='官网结账尚未完成加载，当前购物袋保留，请查看页面后继续')
+        return await self._wait_checkout_stage(timeout=timeout,entry=True)
+
+    async def _wait_checkout_stage(self, *, wanted=('pickup','contact','payment'),timeout=30,entry=False):
+        deadline=asyncio.get_running_loop().time()+timeout
+        observed=tuple(wanted)+('consent',)+(('guest',) if entry or not self.guest_attempted else ())
+        while asyncio.get_running_loop().time()<deadline:
+            self.control.check()
+            try:snapshot=await checkout_state(self.page,wait=500,wanted=observed)
+            except PlaywrightError as exc:
+                if self.page.is_closed():
+                    raise UserAction('官网购买页面已关闭，请重新打开软件浏览器后检查；不会继续提交') from None
+                if re.search(r'Execution context was destroyed|Cannot find context with specified id',str(exc)):
+                    await self.control.sleep(.05);continue
+                raise
+            stage=snapshot['stage']
+            if stage!=self.checkout_observed_stage:
+                self.checkout_observed_stage=stage
+                # Control names/store options only. Never emit body text or
+                # contact input values from this in-memory snapshot.
+                self.progress('checkout_page',{'stage':stage,'buttons':snapshot['diagnostic_buttons'],
+                    'radios':snapshot['radios'] if stage=='pickup' else [],
+                    'contact_fields':snapshot['contact_fields'],'continuation_buttons':snapshot['continuation_buttons']})
+            if apple_auth_url(self.page.url):await self.login_guard(self.page)
+            elif stage!='consent' or not entry:await self.guard(text=snapshot['text'])
+            if entry and stage in ('consent','guest'):return stage
+            # Consent disappearing precedes the fulfillment form loading. Wait
+            # for its controls, not merely the modal disappearing or URL change.
+            if stage=='consent':continue
+            if stage in wanted:return stage
+            if stage=='guest' and self.guest_attempted:
+                continue
+            if await visible_login_form(self.page):
+                if entry:
+                    await self.control.sleep(.5);return 'login'
+                raise UserAction('官网仍要求登录，请完成登录或检查预选结账策略；当前购物袋保留')
+            await self.control.sleep(.05)
+        self.progress('checkout_observation',{'stage':snapshot['stage'],
+            'contact_fields':snapshot['contact_fields'],'continuation_buttons':snapshot['continuation_buttons'],
+            **({'buttons':snapshot['diagnostic_buttons'],
+                'radios':[r for r in snapshot['radios'] if re.fullmatch(r'R\d{3,6}',r['value'])
+                          or re.match(r'^(为我送货|我要取货|取货日期|取货时间)',r['label'])]} if snapshot['stage']=='pickup' else {})})
+        raise UserAction('官网结账尚未完成加载，当前购物袋保留，请查看页面后继续')
 
     async def inspect_customer_fields(self):
         labels=await self.page.get_by_role('textbox').evaluate_all('els=>els.map(e=>e.getAttribute("aria-label") || Array.from(e.labels||[]).map(l=>l.innerText).join(" "))')
@@ -777,12 +862,19 @@ class AppleAdapter(AppleLogin, AppleConsent):
 
     async def select_payment(self,config):
         await self.guard()
-        contact=self.page.get_by_role('button',name='继续选择付款方式',exact=True)
-        if await contact.is_visible():
+        stage=(await checkout_state(self.page))['stage']
+        if stage=='contact':
+            await self.check_customer_verification()
+            contact=self.page.get_by_role('button',name=re.compile(r'^继续选择付款方式(?:\s|$)')).filter(visible=True)
+            if not await contact.count():
+                contact=self.page.get_by_role('button',name='继续',exact=True).filter(visible=True)
+            if await contact.count()!=1:
+                raise UserAction('取货资料的继续按钮无法唯一确认，请在官网核对后继续')
             await contact.click()
             try:
-                await self.page.wait_for_url(re.compile(r'Payment|Billing'),timeout=15000)
-            except PlaywrightTimeout:
+                await self._wait_checkout_stage(wanted=('payment',),timeout=15)
+            except UserAction as exc:
+                if not str(exc).startswith('官网结账尚未完成加载'):raise
                 raise UserAction("官网尚未接受取货信息或手机验证，请在浏览器查看错误后继续") from None
         # Runtime discovery: unavailable payment methods are never assumed.
         await self.page.get_by_role('heading',name='你希望如何付款？',exact=True).wait_for()
@@ -905,16 +997,3 @@ class AppleAdapter(AppleLogin, AppleConsent):
         if self.submit_attempted:
             return await self._current_receipt()
         raise UserAction("重新启动后需通过 Apple 正常订单状态页面人工确认旧订单；软件不会重复提交")
-
-    async def _wait_any(self,names,timeout=30,*,login_entry=False,interval=.2,message='官网跳转超时，请在浏览器处理登录或提示后继续'):
-        deadline=asyncio.get_running_loop().time()+timeout
-        while asyncio.get_running_loop().time()<deadline:
-            self.control.check()
-            for name in names:
-                if await self.page.get_by_role('button',name=name,exact=True).is_visible(): return
-            if login_entry and await visible_login_form(self.page):
-                # Let a normally rendered guest button appear before pausing.
-                await self.control.sleep(.5)
-                return
-            await self.control.sleep(interval)
-        raise UserAction(message)

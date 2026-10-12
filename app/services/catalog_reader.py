@@ -7,6 +7,7 @@ from app.models.config import apple_url, money
 from app.models.flow import RateLimited, UserAction, Stopped
 from app.services.catalog import groups_from_controls, clean_name, normalize_name
 from copy import deepcopy
+from app.services.sku import SKU_LINK_SCRIPT, variants_from_links
 
 
 LINK_SCRIPT='''els=>els.filter(a=>!!a.getClientRects().length).map(a=>{
@@ -68,6 +69,7 @@ async def read_catalog(adapter, *, existing=(), maximum=60, on_progress=None):
             try:await page.locator('input[name*="dimension"],select').first.wait_for(state='attached',timeout=1500)
             except Exception:pass
             controls=await adapter.options();body=await page.locator('body').inner_text()
+            sku_links=await page.locator('a[href]').evaluate_all(SKU_LINK_SCRIPT)
             notice=next((s.strip() for s in body.splitlines() if '接受预购' in s or '开始预购' in s),'')
             price=re.search(r'RMB\s*([\d,]+(?:\.\d+)?)',body[:3000])
             record={'name':name or clean_name(item['name']),'url':page.url.split('?')[0],
@@ -88,6 +90,7 @@ async def read_catalog(adapter, *, existing=(), maximum=60, on_progress=None):
                     variant['name']=re.search(r'iPhone\s+\d+\s+Pro(?:\s+Max)?',model['label'])[0]
                     variant['locked_options']={model['name']:model['value']}
                     variant['groups']=[g for g in variant['groups'] if g['key']!=model['name']]
+                variant['variants']=variants_from_links(variant,sku_links)
                 variants.append(variant)
             for variant in variants:
                 if not apple_url(variant['url']):continue

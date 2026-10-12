@@ -136,13 +136,14 @@ async def test_old_account_document_cannot_be_treated_as_recovered_target_produc
 
 
 @pytest.mark.e2e
-async def test_consent_handoff_does_not_check_or_submit_the_apple_agreement(browser):
+async def test_unknown_privacy_controls_do_not_select_or_submit_an_unrelated_choice(browser):
     context=await browser.new_context();page=await context.new_page();events=[]
     await context.route('**/*',lambda route:route.fulfill(content_type='text/html; charset=utf-8',
         body='<h1>数据隐私知情同意书</h1><label><input type="checkbox">我同意</label><button>同意并继续</button>'))
     await page.goto('https://secure.www.apple.com.cn/shop/checkout');adapter=AppleAdapter(page,Control(False),progress=lambda k,d:events.append((k,d)))
+    adapter.privacy_config=Settings()
     try:
-        with pytest.raises(UserAction,match='同意书'):await adapter.guard()
+        with pytest.raises(UserAction,match='隐私选项未能自动处理'):await adapter.guard()
         with pytest.raises(UserAction):await adapter.guard()
         assert not await page.get_by_role('checkbox').is_checked()
         assert sum(k=='consent_required' for k,d in events)==1

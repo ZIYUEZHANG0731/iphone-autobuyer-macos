@@ -14,6 +14,7 @@ class Control:
         self.site_cooldown=site_cooldown
         self.quote_lock=threading.Lock();self.approved_quotes=set()
         self.consent_lock=threading.Lock();self.consent_approval=None
+        self.consent_generation=0
 
     def approve_consent(self, key):
         # A deliberate GUI action authorizes only this observed page, once.
@@ -36,17 +37,20 @@ class Control:
         with self.consent_lock:self.consent_approval=None
 
     def resume(self):
+        with self.consent_lock:self.consent_generation+=1
         self.resume_event.set()
 
     def cancel_task(self):
         self.cancel_event.set()
-        with self.consent_lock:self.consent_approval=None
+        with self.consent_lock:
+            self.consent_approval=None;self.consent_generation=0
 
     def reset_task(self):
         self.cancel_event.clear()
         self.resume_event.clear()
         with self.quote_lock:self.approved_quotes.clear()
-        with self.consent_lock:self.consent_approval=None
+        with self.consent_lock:
+            self.consent_approval=None;self.consent_generation=0
 
     def check_session(self):
         if self.stop_event.is_set():

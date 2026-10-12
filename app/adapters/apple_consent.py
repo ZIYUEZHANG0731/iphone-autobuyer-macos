@@ -7,6 +7,7 @@ from playwright.async_api import Error as PlaywrightError, expect
 from app.models.flow import UserAction
 from app.adapters.controls import ensure_checked
 from app.services.consent import matches_saved_notice, consent_reason, NOTICE_VERSION
+from app.services.login import shop_signin_url
 
 
 class AppleConsent:
@@ -17,11 +18,16 @@ class AppleConsent:
     async def handle_consent(self,page,text):
         # Read visible page text in memory only; never log a DOM dump with identities.
         # These legal consent controls are observed on Apple's actual checkout.
+        if '同意并继续' not in text:
+            self.privacy_seen=False
+            return
         consent=page.get_by_role("button",name="同意并继续",exact=True)
         if await consent.is_visible():
             snapshot=await self.consent_snapshot(page,text)
             if not snapshot:self.control.consume_consent('')
-            checkout=urlsplit(page.url).path.rstrip('/')=='/shop/checkout'
+            path=urlsplit(page.url).path.rstrip('/')
+            checkout=(path=='/shop/checkout' or
+                      (self.cart_checked and self.guest_attempted and shop_signin_url(page.url)))
             saved_choice=bool(snapshot and checkout and not self.preconsent_used and matches_saved_notice(snapshot,self.privacy_config))
             current_choice=bool(snapshot and self.control.consume_consent(snapshot['key']))
             if saved_choice or current_choice:
@@ -47,13 +53,15 @@ class AppleConsent:
                                                   'source':'saved' if saved_choice else 'current',
                                                   'notice_version':NOTICE_VERSION if saved_choice else ''})
                 return
-            key=snapshot['key'] if snapshot else True
+            key=(snapshot['key'] if snapshot else True,self.control.consent_generation)
             if self.privacy_seen != key:
                 self.privacy_seen=key
                 diagnostic=consent_reason(snapshot,self.privacy_config,used=self.preconsent_used)
                 self.progress('consent_status',diagnostic)
+                # A real Resume clears the GUI's old entry. Re-publish then,
+                # while repeated guards without Resume remain deduplicated.
                 self.progress('consent_required',dict(snapshot or {'title':'Apple 数据隐私知情同意书'},reason=diagnostic))
-            raise UserAction("Apple 要求签署数据隐私知情同意书，请在软件中选择本次确认，或在浏览器处理后点“继续检查”")
+            raise UserAction("官网隐私选项未能自动处理，当前页面保留；请查看官网提示后点“继续检查”")
         self.privacy_seen=False
 
     async def consent_snapshot(self,page,text):
@@ -71,8 +79,8 @@ class AppleConsent:
         choice=re.search(r'我同意\s*Apple',legal,re.I)
         if not choice or choice.start()>2000:return None
         details=legal[:choice.start()].strip()
-        # Read the visible notice's common container, including text below its
-        # button. A new paragraph there must also invalidate a saved choice.
+        # Keep the current notice's visible text in memory for diagnostics;
+        # automatic agreement is selected by the two known controls, not its version.
         notice_text=await container.evaluate('''root=>{
           const clone=root.cloneNode(true);
           const originals=Array.from(root.querySelectorAll('*'));

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from app.models.config import apple_url, money
 from app.utils.paths import resource_path
 from app.utils.files import write_private_json
+from app.services.sku import selected_variant, family_url
 
 
 OPTION_TITLES={'dimensionColor':'颜色','dimensionCapacity':'容量','dimensionModel':'机型',
@@ -64,6 +65,8 @@ def exact_product_link(items, name):
 
 
 def quoted_total(offer, options, quantity=1):
+    variant=selected_variant(offer,options)
+    if variant and variant.get('price'):return str(money(variant['price'])*quantity)
     prices=[]
     for group in offer.get('groups',[]):
         selected=next((c for c in group['choices'] if c['value']==options.get(group['key'])),None)
@@ -78,11 +81,20 @@ class CatalogCache:
         self.path=Path(root)/'public-catalog.json'
 
     def load(self):
+        bundled=[]
+        try:bundled=json.loads(resource_path('services/official_catalog.json').read_text(encoding='utf-8')).get('products',[])
+        except (OSError,ValueError,TypeError,AttributeError):pass
         for path in (self.path,resource_path('services/official_catalog.json')):
             try:
                 raw=json.loads(path.read_text(encoding='utf-8'))
                 products=[p for p in raw.get('products',[]) if p.get('name') and apple_url(p.get('url','')) and not re.fullmatch(r'/shop/buy-[^/]+/?',urlsplit(p['url']).path)]
-                if products:return products
+                if products:
+                    for product in products:
+                        preset=next((p for p in bundled if normalize_name(p.get('name',''))==normalize_name(product['name'])
+                                     and family_url(p.get('url',''))==family_url(product['url'])),None)
+                        if preset and not product.get('variants') and product.get('groups')==preset.get('groups'):
+                            product['variants']=preset.get('variants',[])
+                    return products
             except (OSError,ValueError,TypeError,AttributeError,KeyError):pass
         return []
 

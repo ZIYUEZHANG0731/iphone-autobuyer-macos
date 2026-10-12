@@ -8,6 +8,7 @@ import hashlib
 from app.models.config import Settings,Mode,Product
 from app.security.privacy import Redactor
 from app.models.flow import FlowError
+from app.security.vault import settings_for_disk
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -43,7 +44,7 @@ class Repository:
     def save_config(self, config: Settings):
         config.validate(Mode.WEBSITE_DRY_RUN, require_stores=False)
         with self.connect() as db:
-            db.execute("INSERT OR REPLACE INTO config VALUES(1,?)", (json.dumps(config.to_dict(),ensure_ascii=False),))
+            db.execute("INSERT OR REPLACE INTO config VALUES(1,?)", (json.dumps(settings_for_disk(config),ensure_ascii=False),))
 
     def load_config(self) -> Settings:
         with self.connect() as db:

@@ -58,7 +58,74 @@
       ],
       "preorder_note": "10 月 16 日晚 8 点接受预购。10 月 23 日发售。",
       "observed_at": "2026-10-12T00:37:04.017404+00:00",
-      "base_price": "15999.00"
+      "base_price": "15999.00",
+      "variants": [
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2q4ch/a",
+          "options": {
+            "dimensionColor": "nightsky",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "17999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2w4ch/a",
+          "options": {
+            "dimensionColor": "nightsky",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "26499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2p4ch/a",
+          "options": {
+            "dimensionColor": "starwhite",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "17999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2m4ch/a",
+          "options": {
+            "dimensionColor": "starwhite",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "15999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2u4ch/a",
+          "options": {
+            "dimensionColor": "nightsky",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "21499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2n4ch/a",
+          "options": {
+            "dimensionColor": "nightsky",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "15999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2v4ch/a",
+          "options": {
+            "dimensionColor": "starwhite",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "26499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-duo/mk2t4ch/a",
+          "options": {
+            "dimensionColor": "starwhite",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "21499.00"
+        }
+      ],
+      "sku_observed_at": "2026-10-12T21:22:30.664911+00:00"
     },
     {
       "name": "iPhone 17",
@@ -116,7 +183,90 @@
       ],
       "preorder_note": "",
       "observed_at": "2026-10-12T00:37:13.388977+00:00",
-      "base_price": "6799.00"
+      "base_price": "6799.00",
+      "variants": [
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg724ch/a",
+          "options": {
+            "dimensionColor": "black",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "8799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg714ch/a",
+          "options": {
+            "dimensionColor": "sage",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "6799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg734ch/a",
+          "options": {
+            "dimensionColor": "white",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "8799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg704ch/a",
+          "options": {
+            "dimensionColor": "lavender",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "6799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg764ch/a",
+          "options": {
+            "dimensionColor": "sage",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "8799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg744ch/a",
+          "options": {
+            "dimensionColor": "mistblue",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "8799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg754ch/a",
+          "options": {
+            "dimensionColor": "lavender",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "8799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg6y4ch/a",
+          "options": {
+            "dimensionColor": "mistblue",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "6799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg6w4ch/a",
+          "options": {
+            "dimensionColor": "black",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "6799.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg6x4ch/a",
+          "options": {
+            "dimensionColor": "white",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "6799.00"
+        }
+      ],
+      "sku_observed_at": "2026-10-12T21:22:30.664911+00:00"
     },
     {
       "name": "iPhone 17e",
@@ -164,7 +314,58 @@
       ],
       "preorder_note": "",
       "observed_at": "2026-10-12T00:37:17.437418+00:00",
-      "base_price": "5299.00"
+      "base_price": "5299.00",
+      "variants": [
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhu64ch/a",
+          "options": {
+            "dimensionColor": "soft_pink",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "5299.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhu74ch/a",
+          "options": {
+            "dimensionColor": "black",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "7299.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhu44ch/a",
+          "options": {
+            "dimensionColor": "black",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "5299.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhu54ch/a",
+          "options": {
+            "dimensionColor": "white",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "5299.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhu94ch/a",
+          "options": {
+            "dimensionColor": "white",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "7299.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-17e/mhua4ch/a",
+          "options": {
+            "dimensionColor": "soft_pink",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "7299.00"
+        }
+      ],
+      "sku_observed_at": "2026-10-12T21:22:30.664911+00:00"
     },
     {
       "name": "iPhone 18 Pro",
@@ -232,7 +433,154 @@
       "base_price": "9999.00",
       "locked_options": {
         "dimensionScreensize": "6_3inch"
-      }
+      },
+      "variants": [
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtc4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "11999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjta4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "9999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtf4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "11999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtg4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "15499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtd4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "11999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjte4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "11999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtj4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "15499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtl4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "20499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtk4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "15499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjth4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "15499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtp4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "20499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtm4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "20499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjtn4ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "20499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjt74ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "9999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjt84ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "9999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjt94ch/a",
+          "options": {
+            "dimensionScreensize": "6_3inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "9999.00"
+        }
+      ],
+      "sku_observed_at": "2026-10-12T21:22:30.664911+00:00"
     },
     {
       "name": "iPhone 18 Pro Max",
@@ -300,8 +648,156 @@
       "base_price": "9999.00",
       "locked_options": {
         "dimensionScreensize": "6_9inch"
-      }
+      },
+      "variants": [
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyh4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "16499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyg4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "16499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyf4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "16499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjym4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "21499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyl4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "21499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyk4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "21499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyj4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "1tb"
+          },
+          "price": "16499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyn4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "2tb"
+          },
+          "price": "21499.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjy94ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "10999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjy84ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "10999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjy74ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "10999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjy64ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "256gb"
+          },
+          "price": "10999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjya4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "black",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "12999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjye4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "glacier",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "12999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyd4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "burgundy",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "12999.00"
+        },
+        {
+          "url": "https://www.apple.com.cn/shop/buy-iphone/iphone-18-pro/mjyc4ch/a",
+          "options": {
+            "dimensionScreensize": "6_9inch",
+            "dimensionColor": "silver",
+            "dimensionCapacity": "512gb"
+          },
+          "price": "12999.00"
+        }
+      ],
+      "sku_observed_at": "2026-10-12T21:22:30.664911+00:00"
     }
   ],
-  "unread_pages": []
+  "unread_pages": [],
+  "sku_checked_at": "2026-10-12T21:22:30.664911+00:00"
 }
