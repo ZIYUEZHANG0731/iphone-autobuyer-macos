@@ -2,7 +2,7 @@
 
 日期：2026-10-13。目标优先级：Windows 11 x64。
 
-> 后续 Windows 真机工作已在同分支推进到 v0.7.6 / build 47：源码全量 544 passed、3 项 macOS 专项跳过，已验证原生 ACL、电源 API、两类浏览器离线流程与便携包。真实官网已确认环球港并进入取货信息页；只用账户重试仍待真实认证通过，日常 Chrome 扩展连接已经成立。缺失取货地区的自动选择、当前账户入口复核和 Windows 网络诊断均已补齐。最新证据及剩余核对验收见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
+> 后续 Windows 真机工作已在同分支推进到 v0.7.8 / build 51：源码全量 565 passed、3 项 macOS 专项跳过。原生 ACL、电源 API、两类浏览器离线流程与便携包有分阶段证据；当前商品页账户入口复核、购物袋稳定及保存等待已补齐。历史真实官网曾进入取货信息页，build 49 持续日常 Chrome 会话曾确认登录；本轮新连接尚未成立，最终核对页仍待真实验收。最新证据及剩余工作见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
 
 - 分支：[`codex/windows-port`](https://github.com/ZIYUEZHANG0731/iphone-autobuyer-macos/tree/codex/windows-port)。
 - 适配及测试提交：`f1104f905c754a05a56fbb20850958ef611dae1a`（v0.7.6 / build 44）；本交接文档随后在同分支追加。克隆后用 `git log -2 --oneline` 查看代码提交和文档提交，用 `git rev-parse HEAD` 记录本次验收实际版本。

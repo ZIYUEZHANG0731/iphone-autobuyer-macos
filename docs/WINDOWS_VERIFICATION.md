@@ -1,4 +1,4 @@
-# Windows 第二阶段验收（v0.7.7 / build 50）
+# Windows 第二阶段验收（v0.7.8 / build 51）
 
 日期：2026-10-13。代码基线 `1472e79`，在 `codex/windows-port` 继续；macOS `main` 未改变。第一阶段结果保留在 [Windows 交接](WINDOWS_HANDOFF.md)，本页记录实际 Windows 证据。
 
@@ -115,6 +115,18 @@ IDMS 第一阶段的密码框祖先 `aria-hidden="true"`、高度为 0，但密�
 干净搜索路径 PyInstaller 构建成功；最终冻结环境、GUI、内置 renderer 和合成单次订单自检全部通过。证据 `reports/windows-build49.log`、`windows-self-test49.log`、`windows-package49.log`，合成隔离目录 `AutoBuyer packaged 93347d19-2a2a-4c45-8ec0-c63f541e9766`。最终包 **`dist/build49/iPhone AutoBuyer Windows v0.7.6.zip`**，263,978,343 字节；SHA256 **`5a357d0a79be7196cfede9d8be6fff131d1aaee769ea2c42a8d65061d419dc61`**。没有重复新电脑或全新用户验收。
 
 真正的登录结果仍未通过：16:38 的正常 Chrome 点击链和 17:00 的单一新登录页链，均为初始化 200 / JSON、单次密码提交 503 / HTML。公开入口的请求语言、认证语言参数和时钟均已核实。没有继续循环重发密码，没有创建真实订单。日常 Chrome 控制接口不可用，真实成功认证对照尚未取得，详情见 [登录诊断](LOGIN_DIAGNOSIS.md)。
+
+## build 51：商品页账户入口及慢速复核
+
+按用户继续测试日常 Chrome 的要求检查已选 iPhone 商品页。此前只把 `/store` 和 `/shop/bag` 纳入当前商店账户入口复核，商品页仍直达通用账户地址。现在 iPhone 购买页也通过临时页面的正常购物袋菜单跟随实际账户入口，保留用户原商品页；非中国商店、相似路径和结账页不会因此被认可为商店菜单页。账户页面导航等待由 5 秒补齐为 15 秒，与已有菜单登录和账户跳转一致。
+
+新增真实 Chromium 合成页面回归先在旧代码复现 **4 failed / 4 passed**：已登录商品页被通用入口误报为需登录、过期商品页使用了错误入口，以及两种 5.5 秒账户返回提前成为未知状态。修复后登录、账户 GUI、页面保留和日常 Chrome 专项 **138 passed / 80.59 秒**；完整源码 **565 passed / 3 macOS skipped / 350.59 秒**。证据为 `reports/login51-before.xml`、`login51-after.xml`、`windows-source51.xml` 和 `windows-source51.log`。
+
+本轮 build 50 日常 Chrome 扩展连接两次等待满 10 分钟后超时；随后为更新程序停止第三次等待。软件显示 Chrome 尚未接入，本轮没有进入加购或结账，也没有提交密码、创建订单或付款。Windows 控制工具此前因不能可靠确认 Chrome 当前网址而终止，当前浏览器接口也没有暴露日常 Chrome，不能通过另一个资料目录代替真实登录会话。本轮离线修复尚不能记作新的官网登录或核对页验收。
+
+干净 DLL 搜索路径构建、冻结环境、GUI、内置 renderer 和合成单次订单检查全部退出 0；合成数据独立于用户目录，隔离目录 `AutoBuyer packaged 7a8df86f-b193-4fcf-a22b-1361016b4f3f`。证据 `reports/windows-build51.log` 和 `windows-package51.json`。完整 ZIP **`dist/build51/iPhone AutoBuyer Windows v0.7.8.zip`** 为 **263,981,713 字节**，**3,714 个唯一条目**，CRC 检查通过，没有用户资料。SHA256：**`0e2d9c328a83c7728c3ead799fe4e976f87a7c0adb8584be512af6c162a2c1d1`**。
+
+本机 build 50 正常退出，已打开并核对 build 51 / v0.7.8 的实际窗口；原紫色 256GB / 1 件 iPhone 17、门店顺序、支付宝 / 微信支付及只用账户策略保留。账户和取货资料经软件本机加密存储移交后，已在新程序恢复为「仅本次使用」。实读确认持久私有记录为 **0**，配置无账户或取货人输入引用，真实提交记录为 **0**。没有重复新电脑或新用户验收。
 
 ## build 50：购物袋空态与更新等待
 

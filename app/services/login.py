@@ -41,7 +41,11 @@ def store_page_url(url):
 
 
 def storefront_page_url(url):
-    return apple_url(url) and urlsplit(url).path.rstrip('/') in ('/store', '/shop/bag')
+    if not apple_url(url):
+        return False
+    path = urlsplit(url).path.rstrip('/')
+    return (path in ('/store', '/shop/bag', '/shop/buy-iphone')
+            or path.startswith('/shop/buy-iphone/'))
 
 
 def session_page_url(url):

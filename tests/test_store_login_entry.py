@@ -8,7 +8,7 @@ from app.automation.control import Control
 from app.gui.worker import Worker
 from app.models.config import Settings
 from app.models.flow import UserAction
-from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY, shop_signin_url, visible_login_form
+from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY, shop_signin_url, storefront_page_url, visible_login_form
 from app.services.signin import SignInController, credential_origin
 
 
@@ -121,7 +121,8 @@ async def test_logged_in_store_is_verified_through_its_visible_account_link_with
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize('entry', [STORE_ENTRY, 'https://secure9.www.apple.com.cn/shop/bag'])
+@pytest.mark.parametrize('entry', [STORE_ENTRY, 'https://secure9.www.apple.com.cn/shop/bag',
+    'https://www.apple.com.cn/shop/buy-iphone/iphone-17/mg704ch/a'])
 @pytest.mark.parametrize('expired', [False, True])
 async def test_public_session_check_uses_website_account_entry_and_preserves_original_page(browser,entry,expired):
     import json
@@ -140,6 +141,29 @@ async def test_public_session_check_uses_website_account_entry_and_preserves_ori
         assert requests==[('GET',entry),('GET',entry),('GET',ACCOUNT_URL)]
         assert page.url==entry and context.pages==[page]
         assert await page.locator('#globalnav-menubutton-link-bag').get_attribute('aria-expanded')=='false'
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('expired', [False, True])
+async def test_slow_protected_session_check_preserves_page_without_reauthentication(browser,expired):
+    import asyncio
+    context=await browser.new_context();page=await context.new_page();requests=[]
+    async def respond(route):
+        requests.append((route.request.method,route.request.url))
+        if len(requests)>1:
+            await asyncio.sleep(5.5)
+        body=FORM_HTML if expired else '<a href="/shop/signOut">退出登录 测试账户</a>'
+        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
+    await context.route('**/*',respond)
+    try:
+        await page.goto(ACCOUNT_URL)
+        result=await AppleAdapter(page,Control(False)).check_login(auto_recover=False)
+        assert result is (not expired)
+        assert requests==[('GET',ACCOUNT_URL),('GET',ACCOUNT_URL)]
+        assert page.url==ACCOUNT_URL and context.pages==[page]
+        if expired:
+            assert await page.locator('input[type="password"]').input_value()==''
     finally:await context.close()
 
 
@@ -268,3 +292,15 @@ async def test_remembered_store_identity_with_expired_authentication_is_never_co
 def test_exact_official_signin_paths_include_the_bag_entry(url,allowed):
     assert shop_signin_url(url) is allowed
     assert credential_origin(url) is allowed
+
+
+@pytest.mark.parametrize('url,allowed',[
+    ('https://www.apple.com.cn/shop/buy-iphone',True),
+    ('https://secure9.www.apple.com.cn/shop/buy-iphone/iphone-17/mg704ch/a',True),
+    ('https://www.apple.com.cn/shop/buy-iphoneOther',False),
+    ('https://www.apple.com.cn/shop/checkout',False),
+    ('https://www.apple.com.cn:8443/shop/buy-iphone/iphone-17',False),
+    ('https://www.apple.com.cn.attacker.invalid/shop/buy-iphone/iphone-17',False),
+])
+def test_product_menu_session_check_remains_on_exact_china_shop_paths(url,allowed):
+    assert storefront_page_url(url) is allowed
