@@ -3,7 +3,7 @@ import asyncio
 import re
 from urllib.parse import urlsplit
 
-from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Error as PlaywrightError, expect
 
 from app.models.config import apple_url
 from app.models.flow import UserAction
@@ -82,6 +82,14 @@ async def sign_in_button(frame):
     return known if await known.count() == 1 else None
 
 
+async def activate_login_control(control):
+    # Qt's CDP input can acknowledge an iframe click without activating its
+    # control. Use this uniquely observed, enabled element's standard action;
+    # the page still handles authentication and any security verification.
+    await expect(control).to_be_enabled(timeout=5000)
+    await control.evaluate('(element) => element.click()')
+
+
 class SignInController:
     def __init__(self):
         self.attempted = set()
@@ -93,12 +101,12 @@ class SignInController:
         self.attempted.discard(credential_id)
         self.pending_page = None
 
-    async def run(self, page, config, *, provider, guard, control, progress, timeout=15):
+    async def run(self, page, config, *, provider, guard, control, progress, timeout=15, wait_for_form=False):
         if not config.auto_login or not config.credential_id or not provider:
             return False
         try:
-            return await self._run(page, config, provider, guard, control, progress, timeout)
-        except PlaywrightError:
+            return await self._run(page, config, provider, guard, control, progress, timeout, wait_for_form)
+        except (PlaywrightError, AssertionError):
             # Playwright can include a typed value in its diagnostic; never pass it on.
             # An auth iframe can disappear during the successful parent return.
             # Only observe that return; do not repeat a typed or submitted value.
@@ -145,7 +153,7 @@ class SignInController:
             if key not in self.trust_attempted:
                 await guard()
                 self.trust_attempted.add(key)
-                await button.click(timeout=5000)
+                await activate_login_control(button)
                 progress('auto_login', {'status': 'trust_selected', 'message': '已按提前选择确认信任此浏览器；后续是否要求验证仍由 Apple 决定'})
             return True
         return False
@@ -167,17 +175,24 @@ class SignInController:
                     return True
         return False
 
-    async def _run(self, page, config, provider, guard, control, progress, timeout):
-        await guard()
-        frames = await auth_frames(page)
-        await self._blocked_step(frames, progress)
-        form = await sign_in_form(page)
-        if not form and await self._success(page, config, progress):
-            return True
-        trust = await self._trust(frames, config, guard, progress)
-        form = await sign_in_form(page)
-        if not form and not trust:
-            return False
+    async def _run(self, page, config, provider, guard, control, progress, timeout, wait_for_form):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            await guard()
+            frames = await auth_frames(page)
+            await self._blocked_step(frames, progress)
+            form = await sign_in_form(page)
+            if not form and await self._success(page, config, progress):
+                return True
+            trust = await self._trust(frames, config, guard, progress)
+            if form or trust:
+                break
+            if not wait_for_form:
+                return False
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise UserAction('Apple 结账登录表单仍在加载；保留购物袋，不会提前切换游客或提交密码')
+            await control.sleep(min(.15, remaining))
         credential = None
         account_entered = None
         account_submitted = password_submitted = False
@@ -188,7 +203,6 @@ class SignInController:
             credential.validate()
             self.attempted.add(config.credential_id)
             progress('auto_login', {'status': 'started', 'message': '官网明确要求登录，正在使用本次已填写的账号密码尝试一次'})
-        deadline = asyncio.get_running_loop().time() + timeout
         while True:
             await guard()
             frames = await auth_frames(page)
@@ -215,13 +229,16 @@ class SignInController:
                     await password.fill(credential.password, timeout=5000)
                     remember = frame.get_by_role('checkbox', name=re.compile(r'^(记住我|记住我的账户|Remember me|Remember my Apple Account)$', re.I)).filter(visible=True)
                     if config.trust_browser and await remember.count() == 1:
-                        await remember.check(timeout=5000)
+                        if not await remember.is_checked():
+                            await guard()
+                            await activate_login_control(remember)
+                        await expect(remember).to_be_checked(timeout=5000)
                     button = await sign_in_button(frame)
                     if button is None:
                         raise UserAction('官网登录按钮无法唯一确认，请手动继续')
                     await guard()
                     password_submitted = True
-                    await button.click(timeout=5000)
+                    await activate_login_control(button)
                 elif not account_submitted and not password_submitted and await account.count():
                     await guard()
                     await account.fill(credential.account, timeout=5000)
@@ -233,7 +250,7 @@ class SignInController:
                     account_entered = frame
                     account_submitted = True
                     await guard()
-                    await button.click(timeout=5000)
+                    await activate_login_control(button)
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise UserAction('Apple 登录尚未返回明确结果；已保留会话，不会重复提交密码')

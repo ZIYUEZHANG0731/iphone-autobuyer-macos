@@ -729,7 +729,10 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         if not fulfillment_ready and config.checkout_strategy!='guest' and config.auto_login:
             # Credentials take priority over the explicitly selected guest backup.
             # A rejected/uncertain attempt pauses with the bag intact.
-            await self.auto_sign_in(self.page,config)
+            if await self.auto_sign_in(self.page,config,wait_for_form=current_stage=='guest'):
+                # Login may return while the guest button remains behind an
+                # overlay. Use the confirmed return, not the stale entry state.
+                fulfillment_ready=True
         guest=self.page.get_by_role('button',name='以游客身份继续',exact=True)
         if not fulfillment_ready and await guest.is_visible():
             if config.checkout_strategy=='account_only':
@@ -837,6 +840,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
 
     async def select_payment(self,config):
         await self.guard()
+        await self.focus_control(self.page)
         stage=(await checkout_state(self.page))['stage']
         if stage=='contact':
             await self.check_customer_verification()
@@ -862,6 +866,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
                 await self._check_radio(self.page.get_by_role('radio',name=candidates[0]['label'],exact=True))
                 self.payment=preferred
                 selected=candidates[0]
+                await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout),label='付款方式')
                 if config.installment_months:
                     # Only activate a term actually rendered for the selected bank.
                     pattern=re.compile(r'^'+str(config.installment_months)+r'\s*期(?:\s|0)')
@@ -881,6 +886,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
 
     async def review(self,config):
         await self.guard()
+        await self.focus_control(self.page)
+        await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout),label='付款方案')
         # “检查订单” was observed on the real Billing page; “立即下单” is never clicked.
         advance=self.page.get_by_role('button',name='检查订单',exact=True)
         if await advance.is_visible():

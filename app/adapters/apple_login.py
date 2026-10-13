@@ -90,17 +90,22 @@ class AppleLogin:
         if self.http_status in (403,429,541) and remaining > 0:
             raise RateLimited('Apple 登录请求暂时被拒绝；保留会话，不会重新提交密码',retry_after=max(1,int(remaining)))
 
-    async def auto_sign_in(self,page,config=None):
+    async def auto_sign_in(self,page,config=None,*,wait_for_form=False):
         config=config or self.login_config
-        if not config:return False
+        if not config or not config.auto_login or not config.credential_id or not self.credential_provider:
+            return False
+        # Checkout recovery also needs the GUI-owned Qt view restored before
+        # typing/clicking, just like the standalone login action.
+        await self.focus_login(page)
         return await self.sign_in.run(page,config,provider=self.credential_provider,
             guard=lambda:self.login_guard(page),control=self.control,progress=self.progress,
-            timeout=min(30,config.operation_timeout))
+            timeout=min(30,config.operation_timeout),wait_for_form=wait_for_form)
 
     async def focus_login(self,page):
+        # Queue the view restoration before the Qt bridge sets input focus.
+        self.progress('auth_focus',True)
         if self.page_focus:await self.page_focus(page)
         else:await page.bring_to_front()
-        self.progress('auth_focus',True)
 
     async def confirm_login(self,page=None,*,timeout=15):
         result=await self.login_status(page,timeout=timeout)

@@ -27,6 +27,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         from app.adapters.apple import AppleAdapter
         from app.models.config import Settings, Store, Identity
         from app.models.flow import Availability
+        from app.models.credential import AppleCredential
         from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_MORE, NOTICE_VERSION
         from app.gui.window import MainWindow
         from app.utils.qt import prepare_plugins, single_shot
@@ -105,6 +106,28 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     config=Settings(stores=[Store('Apple 南京东路',store_id='R359')],transmit_identity=True)
                     await adapter.fill_customer(Identity('格式测试','居民身份证后四位','123X','00000000000','format@example.com','格','式测试'),config)
                     assert adapter.identity_filled and await session.page.evaluate('window.continues')==1
+                    # Account recovery in checkout must restore the hidden Qt
+                    # view before submitting its normal iframe login button.
+                    async def signin_fixture(route):
+                        auth=route.request.url.startswith('https://idmsa.apple.com.cn/')
+                        body="""<label>电子邮件或电话号码<input></label><label>密码<input type="password"></label>
+                          <label><input type="checkbox">记住我的账户</label>
+                          <button id="sign-in" onclick="parent.postMessage('fixture-authenticated','https://secure.www.apple.com.cn')">登录</button>""" if auth else """
+                          <iframe style="height:500px;width:100%" src="https://idmsa.apple.com.cn/appleauth/auth/signin"></iframe>
+                          <script>window.loginReturns=0;addEventListener('message',e=>{
+                            if(e.origin==='https://idmsa.apple.com.cn'&&e.data==='fixture-authenticated'){
+                              window.loginReturns++;document.body.innerHTML='<h1>取货联系信息</h1><button>继续选择付款方式</button>';
+                            }})</script>"""
+                        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
+                    await session.context.route('**/*',signin_fixture)
+                    await session.page.goto('https://secure.www.apple.com.cn/shop/checkout?fixture-auth')
+                    config=Settings(credential_id='fixture-only-reference',auto_login=True,trust_browser=True)
+                    adapter.credential_provider=lambda _:AppleCredential('fixture@example.invalid','Synthetic-Only-Password!')
+                    self.browser_hidden.clear();self.hide_browser.emit()
+                    assert await asyncio.to_thread(self.browser_hidden.wait,3)
+                    assert await adapter.auto_sign_in(session.page,config,wait_for_form=True)
+                    assert await session.page.evaluate('window.loginReturns')==1
+                    await session.context.unroute('**/*',signin_fixture)
                     adapter.detach()
                     await session.page.goto('https://autobuyer.invalid/embedded')
                     await session.focus_page()

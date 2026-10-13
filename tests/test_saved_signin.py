@@ -173,6 +173,20 @@ async def test_two_visible_idms_arrows_still_pause_without_submitting(browser):
 
 
 @pytest.mark.e2e
+async def test_disabled_login_control_pauses_without_leaking_or_resubmitting_credentials(browser):
+    body=ONE_STEP.replace('<button ', '<button id="sign-in" disabled ')
+    f=await fixture(browser,body=body)
+    try:
+        for message in ('操作尚未完成','已尝试'):
+            with pytest.raises(UserAction,match=message) as failure:
+                await f.adapter.auto_sign_in(f.page)
+            assert TEST_CREDENTIAL.account not in str(failure.value)
+            assert TEST_CREDENTIAL.password not in str(failure.value)
+        assert not f.submissions and len(f.reads)==1
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_cn_auth_503_is_reported_as_service_failure_without_a_second_password_submission(browser):
     f=await fixture(browser,auth_host='idmsa.apple.com.cn',auth_status=503,
         outcome='<p>无法验证你的身份。重试。</p>')
@@ -242,7 +256,7 @@ async def test_verification_then_trust_uses_one_password_attempt_and_no_otp_auto
         await frame.evaluate('(html)=>document.body.innerHTML=html',TRUST)
         assert await f.adapter.auto_sign_in(f.page)
         assert len(f.submissions)==1 and len(f.reads)==1
-        assert any(data.get('status')=='trust_selected' for _,data in f.events)
+        assert any(data.get('status')=='trust_selected' for kind,data in f.events if kind=='auto_login')
     finally:await f.context.close()
 
 
@@ -252,7 +266,7 @@ async def test_unselected_trust_does_not_click_remember_or_trust(browser):
     try:
         with pytest.raises(UserAction,match='自行选择'):await f.adapter.auto_sign_in(f.page)
         assert len(f.submissions)==1 and not f.submissions[0]['remember']
-        assert not any(data.get('status')=='trust_selected' for _,data in f.events)
+        assert not any(data.get('status')=='trust_selected' for kind,data in f.events if kind=='auto_login')
     finally:await f.context.close()
 
 
@@ -314,6 +328,42 @@ async def test_saved_account_is_attempted_before_guest_and_failure_preserves_bag
             await f.adapter.fill_customer(None,f.config)
         assert await f.page.evaluate('window.guestClicks')==0
         assert len(f.submissions)==1 and len(f.reads)==1
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('strategy', ['account_only', 'account_then_guest'])
+async def test_checkout_waits_for_delayed_auth_frame_without_guest_or_manual_resume(browser,strategy):
+    top='''<button onclick="window.guestClicks++">以游客身份继续</button>
+    <iframe src="%s"></iframe><script>window.guestClicks=0;addEventListener('message',e=>{
+    if(e.origin==='https://idmsa.apple.com'&&e.data==='logged'){
+      document.querySelector('iframe').remove();
+      document.body.insertAdjacentHTML('beforeend','<h1>取货联系信息</h1><button>继续选择付款方式</button>');
+    }});</script>''' % AUTH_URL
+    delayed='<p>正在载入…</p><script>setTimeout(()=>document.body.insertAdjacentHTML("beforeend",'+json.dumps(ONE_STEP)+'),450)</script>'
+    f=await fixture(browser,body=delayed,top=top)
+    f.config.checkout_strategy=strategy
+    focused=[]
+    async def focus(page):focused.append(page)
+    f.adapter.page_focus=focus
+    await f.page.goto('https://secure7.www.apple.com.cn/shop/checkout?_s=Fixture')
+    try:
+        with pytest.raises(UserAction,match='取货人表单'):
+            await f.adapter.fill_customer(None,f.config)
+        # The retained background guest button must not trigger a fallback
+        # after the same page's confirmed account return.
+        assert await f.page.evaluate('window.guestClicks')==0
+        assert len(f.submissions)==1 and len(f.reads)==1 and focused==[f.page]
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+async def test_checkout_auth_loading_timeout_does_not_read_credentials_or_try_guest(browser):
+    f=await fixture(browser,body='<p>正在载入…</p>');f.config.operation_timeout=.25
+    try:
+        with pytest.raises(UserAction,match='表单仍在加载'):
+            await f.adapter.auto_sign_in(f.page,wait_for_form=True)
+        assert not f.submissions and not f.reads
     finally:await f.context.close()
 
 

@@ -356,6 +356,32 @@ async def test_generic_contact_continue_advances_once_without_relying_on_url_cha
     assert await page.evaluate('window.continues')==1
 
 
+@pytest.mark.parametrize('failed',[False,True])
+async def test_bank_terms_wait_for_checkout_save_instead_of_using_early_or_failed_terms(checkout_page,failed):
+    page=checkout_page
+    async def save(route):
+        await asyncio.sleep(.45)
+        await route.fulfill(status=503 if failed else 200,content_type='application/json',body='{}')
+    await page.route('**/shop/checkout/billing',save)
+    await page.set_content('''<main><h1>你希望如何付款？</h1>
+      <label><input type="radio" name="payment" value="installments-fixture" onchange="window.busy=true;
+        fetch('/shop/checkout/billing',{method:'POST'}).then(()=>window.busy=false)">招商银行</label>
+      <label><input type="radio" name="payment" value="alipay">支付宝</label>
+      <label><input id="term" type="radio" name="term" onchange="if(window.busy)window.earlyTerms++">24 期 0% 年化利率</label>
+      </main><script>window.busy=false;window.earlyTerms=0</script>''')
+    adapter=adapter_for(page)
+    config=Settings(payments=['招商银行','支付宝'],installment_months=24)
+    if failed:
+        with pytest.raises(UserAction,match='付款方式的保存'):
+            await adapter.select_payment(config)
+        assert not await page.locator('#term').is_checked()
+    else:
+        assert await adapter.select_payment(config)=='招商银行'
+        assert await page.locator('#term').is_checked()
+    assert await page.evaluate('window.earlyTerms')==0
+    assert not await page.get_by_role('radio',name='支付宝',exact=True).is_checked()
+
+
 async def test_stop_during_checkout_loading_is_responsive(checkout_page):
     page=checkout_page;await page.set_content('<main>正在载入</main>');control=Control(False)
     adapter=adapter_for(page,control=control)

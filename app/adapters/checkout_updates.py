@@ -56,15 +56,15 @@ class CheckoutUpdates:
             self.failed = True
             self.changed.set()
 
-    async def ready(self, control, timeout=8):
+    async def ready(self, control, timeout=8, *, label='取货选择'):
         deadline = asyncio.get_running_loop().time() + timeout
         while self.pending:
             control.check()
             if self.page.is_closed():
-                raise UserAction('官网购买页面已关闭，未继续提交取货门店')
+                raise UserAction(f'官网购买页面已关闭，未继续提交{label}')
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise UserAction('官网仍在保存取货选择，当前购物袋保留；请求完成后可继续检查')
+                raise UserAction(f'官网仍在保存{label}，当前购物袋保留；请求完成后可继续检查')
             self.changed.clear()
             try:
                 await asyncio.wait_for(self.changed.wait(), min(.1, remaining))
@@ -72,4 +72,4 @@ class CheckoutUpdates:
                 pass
         control.check()
         if self.failed:
-            raise UserAction('官网未完成取货选择的保存，当前购物袋保留，请查看官网提示后继续')
+            raise UserAction(f'官网未完成{label}的保存，当前购物袋保留，请查看官网提示后继续')
