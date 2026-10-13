@@ -10,7 +10,7 @@ BAG_STATE_SCRIPT = r'''wait => {
   const read=()=>({
     items:Array.from(document.querySelectorAll('button,[role="button"]')).filter(visible).filter(e=>/^移除\s/.test(text(e))).length,
     empty:Array.from(document.querySelectorAll('h1,[role="heading"][aria-level="1"]')).filter(visible)
-      .some(e=>/^(?:你的)?购物袋(?:目前)?(?:是空的|为空|没有商品)[。.!！]?$/.test(text(e)))
+      .some(e=>/^(?:你的)?购物袋(?:目前)?(?:是空的|为空|(?:中)?没有商品)[。.!！]?$/.test(text(e)))
   });
   const ready=s=>s.items>0 || s.empty;
   const initial=read();if(ready(initial))return initial;

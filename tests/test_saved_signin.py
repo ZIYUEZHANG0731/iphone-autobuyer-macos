@@ -94,6 +94,18 @@ async def fixture(browser, *, body=ONE_STEP, outcome='success', top=TOP, auth_ho
                            events=events, config=config, controller=controller, adapter=adapter)
 
 
+@pytest.mark.parametrize('remembered',[TEST_CREDENTIAL.account, TEST_CREDENTIAL.account*2])
+async def test_signin_replaces_a_remembered_account_instead_of_appending(browser,remembered):
+    f=await fixture(browser,body=ONE_STEP.replace('id="account"','id="account" value="'+remembered+'"'))
+    try:
+        assert await f.adapter.auto_sign_in(f.page,f.config)
+        assert len(f.submissions)==1
+        assert f.submissions[0]['account']==TEST_CREDENTIAL.account
+        assert f.submissions[0]['password']==TEST_CREDENTIAL.password
+    finally:
+        await f.context.close()
+
+
 @pytest.mark.parametrize('url', ['https://idmsa.apple.com.attacker.invalid/appleauth/auth/signin',
     'https://idmsa.apple.com:444/appleauth/auth/signin', 'https://evil@idmsa.apple.com/appleauth/auth/signin',
     'http://idmsa.apple.com/appleauth/auth/signin', 'https://account.apple.com/account/password',

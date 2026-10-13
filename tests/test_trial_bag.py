@@ -89,7 +89,7 @@ async def test_resuming_a_bag_skips_product_stock_and_emits_the_actual_checkout_
     assert backup.name in pickup['message'] and primary.name not in pickup['message']
 
 
-@pytest.mark.parametrize('contents',['delayed','empty','unknown'])
+@pytest.mark.parametrize('contents',['delayed','empty','current_empty','unknown'])
 async def test_loading_bag_is_not_mistaken_for_an_empty_bag(contents):
     import json
     async with async_playwright() as p:
@@ -98,6 +98,7 @@ async def test_loading_bag_is_not_mistaken_for_an_empty_bag(contents):
         item='<h2>iPhone 17 256GB 白色</h2><label>数量<select><option value="1">1</option></select></label><button>移除 iPhone</button>'
         html={'delayed':'<h1>购物袋总计 RMB 6,799.00</h1><div id="items"></div><script>setTimeout(()=>document.getElementById("items").innerHTML='+json.dumps(item)+',150)</script>',
               'empty':'<h1>你的购物袋是空的。</h1>',
+              'current_empty':'<h1>你的购物袋中没有商品。</h1>',
               'unknown':'<h1>购物袋正在加载</h1>'}[contents]
         async def serve(route):
             requests.append(route.request.method)
