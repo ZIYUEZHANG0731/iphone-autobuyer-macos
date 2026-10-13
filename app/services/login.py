@@ -19,7 +19,15 @@ def shop_signin_url(url):
 
 
 def store_page_url(url):
-    return apple_url(url) and urlsplit(url).path.rstrip('/') == '/store'
+    if not apple_url(url):
+        return False
+    parsed = urlsplit(url)
+    # A successful bag-menu sign-in can return to the China homepage rather
+    # than /store. Both expose the normal bag/account menu; neither alone is
+    # evidence of an authenticated session.
+    return (parsed.path.rstrip('/') == '/store'
+            or (parsed.hostname in ('www.apple.com.cn', 'apple.com.cn')
+                and parsed.path in ('', '/')))
 
 
 def session_page_url(url):

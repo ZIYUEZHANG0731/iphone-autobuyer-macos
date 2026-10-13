@@ -158,6 +158,32 @@ async def test_saved_account_logs_in_once_and_remembers_only_when_selected(brows
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('return_url',['https://www.apple.com.cn/','https://www.apple.com.cn/store'])
+async def test_password_success_returning_to_public_china_page_confirms_protected_account_once(browser,return_url):
+    from app.services.login import account_page_url
+    account_url='https://secure11.www.apple.com.cn/shop/account/home'
+    top=TOP.replace("location.href='/shop/account/home'",'location.href='+json.dumps(return_url))
+    f=await fixture(browser,top=top,auth_host='idmsa.apple.com.cn')
+    returns=[]
+    async def landing(route):
+        returns.append(route.request.url)
+        await route.fulfill(content_type='text/html; charset=utf-8',body='''
+            <h1>Apple 中国大陆</h1><button id="globalnav-menubutton-link-bag" aria-expanded="false"
+            onclick="this.setAttribute('aria-expanded','true');document.querySelector('nav').hidden=false">购物袋</button>
+            <nav id="globalnav-submenu-bag" hidden><a href="/shop/signOut">退出登录</a>
+            <a href="'''+account_url+'''">账户</a></nav>''')
+    await f.context.route(return_url,landing)
+    try:
+        assert await f.adapter.auto_sign_in(f.page)
+        assert await f.adapter.confirm_login(timeout=.2)
+        assert f.page.url==account_url and account_page_url(f.page.url)
+        assert returns==[return_url] and len(f.submissions)==len(f.reads)==1
+        assert not f.controller.attempted and f.controller.pending_page is None
+        assert TEST_CREDENTIAL.password not in json.dumps(f.events)
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 @pytest.mark.parametrize('delayed', [False, True])
 async def test_observed_idms_arrow_with_changed_or_delayed_label_submits_once(browser, delayed):
     body=ONE_STEP.replace('<button ', '<button id="sign-in" aria-label="登录 Apple Store" '+('hidden ' if delayed else ''))

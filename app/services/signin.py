@@ -26,7 +26,7 @@ def credential_origin(url):
 
 def login_top_origin(url):
     return ((apple_url(url) and urlsplit(url).path.startswith('/shop/'))
-            or credential_origin(url))
+            or credential_origin(url) or store_page_url(url))
 
 
 async def auth_frames(page):
