@@ -18,3 +18,16 @@ reports/*.txt
 reports/*.log
 payment-qr/
 private-inputs/
+.env
+.env.*
+*.enc
+*.key
+*.pem
+*.db
+chrome-profile/
+embedded-profile/
+browser-profile/
+login-diagnostic*.json
+checkout-diagnostic*.json
+pickup-diagnostic*.json
+bag-diagnostic*.json

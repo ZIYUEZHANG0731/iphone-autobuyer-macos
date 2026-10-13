@@ -70,9 +70,11 @@ v0.6.4 已验证的内置登录修复继续保留。系统中文、地区德国�
 
 本机应用：`~/Applications/iPhone AutoBuyer.app`，可通过 Finder 双击。首次在「诊断…」点击「检查环境」。内置浏览器随应用打包；独立模式使用已安装的 Google Chrome，没有 Chrome 且 Chromium 缺失时点击「安装浏览器」。
 
-源码启动：
+源码启动：需要 Python 3.12 或以上版本；macOS 还需安装 Xcode Command Line Tools。首次使用先克隆仓库，再安装依赖：
 
 ```sh
+git clone https://github.com/ZIYUEZHANG0731/iphone-autobuyer-macos.git
+cd iphone-autobuyer-macos
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium
@@ -197,3 +199,7 @@ Windows 的系统依赖与 PowerShell 入口已整理，真机移植仍待验收
 - [产品需求、心蓝参考与迭代记录](docs/PRODUCT_REVIEW.md)
 
 任何实际库存、首发开放、可选付款方式和取货承诺都以当前 Apple 页面为准。
+
+## 开源许可证
+
+项目代码采用 [MIT License](LICENSE)，允许使用、修改和分发；第三方依赖遵循各自的许可证。仓库提供源码和打包脚本，账号、取货资料、浏览器会话、真实订单记录与付款码保存在使用者本机。
