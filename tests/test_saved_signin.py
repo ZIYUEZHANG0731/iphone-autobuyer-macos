@@ -310,6 +310,22 @@ async def test_verification_then_trust_uses_one_password_attempt_and_no_otp_auto
 
 
 @pytest.mark.e2e
+async def test_selected_trust_button_can_disappear_before_its_heading_and_return_navigation(browser):
+    f=await fixture(browser,outcome=OTP)
+    try:
+        with pytest.raises(UserAction,match='验证码'):await f.adapter.auto_sign_in(f.page)
+        frame=f.page.frames[1]
+        trust=TRUST.replace("parent.postMessage('logged','https://secure7.www.apple.com.cn')",
+            "this.remove();setTimeout(()=>parent.postMessage('logged','https://secure7.www.apple.com.cn'),400)")
+        await frame.evaluate('(html)=>document.body.innerHTML=html',trust)
+        assert await f.adapter.auto_sign_in(f.page)
+        assert len(f.submissions)==1 and len(f.reads)==1
+        assert sum(k=='auto_login' and d.get('status')=='trust_selected' for k,d in f.events)==1
+        assert '/shop/account/home' in f.page.url
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_unselected_trust_does_not_click_remember_or_trust(browser):
     f=await fixture(browser,outcome=TRUST);f.config.trust_browser=False
     try:

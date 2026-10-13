@@ -642,12 +642,16 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
                 raise UserAction("官网加购后的页面已变化，请在浏览器打开购物袋后继续") from None
         await self.page.wait_for_url(re.compile(r'/shop/bag'),timeout=30000)
         await self.guard()
-        if not await bag_has_items(self.page,self.control,self.guard):
+        await self.checkout_updates.ready(self.control,timeout=30,label='购物袋')
+        if not await bag_has_items(self.page,self.control,self.guard,timeout=30,expect_items=True):
             raise UserAction('加购后购物袋仍未显示目标商品，页面已保留；不会重复加购')
         quantities=self.page.get_by_role('combobox',name='数量',exact=True)
         if await quantities.count()!=1:
             raise UserAction("购物袋商品数量无法唯一确认，已暂停")
-        await quantities.select_option(str(config.product.quantity))
+        if await quantities.input_value()!=str(config.product.quantity):
+            await quantities.select_option(str(config.product.quantity))
+            await self.checkout_updates.ready(self.control,timeout=30,label='购物袋数量')
+            await bag_has_items(self.page,self.control,self.guard,timeout=30,expect_items=True)
         await self.page.get_by_role('heading',level=1).wait_for()
         await self._validate_bag(config)
         self.cart_checked=True
@@ -663,6 +667,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         if self.add_attempted:return False
         bag=await self.new_page();bag.on('response',self._response)
         try:
+            await self.focus_control(bag)
             await bag.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
             if urlsplit(bag.url).path.rstrip('/')!='/shop/bag':
                 await self.guard(bag)
@@ -693,7 +698,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         match=re.search(r'总计\s*RMB\s*([\d,]+(?:\.\d+)?)',title)
         if not match or money(match[1])<=0:
             raise FlowError("购物袋总金额超出授权或无法确认")
-        headings=page.get_by_role('heading',level=2)
+        headings=page.get_by_role('heading',level=2).filter(visible=True)
         texts=await headings.all_text_contents()
         normalized=lambda s:re.sub(r'\s+','',s).lower()
         model=normalized(config.product.name)
@@ -703,7 +708,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             # iPhone 17e/Pro and Pro Max cannot match their shorter model names.
             return value.startswith(model) and not (suffix and suffix[0].isascii() and suffix[0].isalpha())
         matching=[s for s in texts if matches(s)]
-        if len(matching)!=1 or await page.get_by_role('button',name=re.compile(r'^移除 ')).count()!=1:
+        if len(matching)!=1 or await page.get_by_role('button',name=re.compile(r'^移除 ')).filter(visible=True).count()!=1:
             raise FlowError("购物袋含非目标商品或商品无法确认")
         quantities=page.get_by_role('combobox',name='数量',exact=True)
         if await quantities.count()!=1 or await quantities.input_value()!=str(config.product.quantity):
@@ -730,6 +735,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         if not apple_auth_url(self.page.url):await self.guard()
         else:await self.login_guard(self.page)
         if await self.page.get_by_role('button',name='结账',exact=True).count():
+            await self.checkout_updates.ready(self.control,timeout=30,label='购物袋')
+            await bag_has_items(self.page,self.control,self.guard,timeout=30,expect_items=True)
             await self._validate_bag(config)
             await self.page.get_by_role('button',name='结账',exact=True).first.click()
             await self._wait_checkout_entry()

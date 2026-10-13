@@ -1,4 +1,4 @@
-"""Wait for normal checkout writes already initiated by the page."""
+"""Wait for normal bag/checkout writes already initiated by the page."""
 import asyncio
 from urllib.parse import urlsplit
 
@@ -32,7 +32,7 @@ class CheckoutUpdates:
 
     def started(self, request):
         path = urlsplit(request.url).path
-        if (apple_url(request.url) and (path == '/shop/checkout' or path.startswith('/shop/checkout/'))
+        if (apple_url(request.url) and path.startswith('/shop/')
                 and request.method not in {'GET', 'HEAD', 'OPTIONS'}):
             if not self.pending:
                 self.failed = False

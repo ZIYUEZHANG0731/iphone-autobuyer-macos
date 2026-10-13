@@ -89,7 +89,7 @@ async def test_resuming_a_bag_skips_product_stock_and_emits_the_actual_checkout_
     assert backup.name in pickup['message'] and primary.name not in pickup['message']
 
 
-@pytest.mark.parametrize('contents',['delayed','empty','unknown'])
+@pytest.mark.parametrize('contents',['delayed','empty','actual_empty','partial','unknown'])
 async def test_loading_bag_is_not_mistaken_for_an_empty_bag(contents):
     import json
     async with async_playwright() as p:
@@ -98,6 +98,8 @@ async def test_loading_bag_is_not_mistaken_for_an_empty_bag(contents):
         item='<h2>iPhone 17 256GB 白色</h2><label>数量<select><option value="1">1</option></select></label><button>移除 iPhone</button>'
         html={'delayed':'<h1>购物袋总计 RMB 6,799.00</h1><div id="items"></div><script>setTimeout(()=>document.getElementById("items").innerHTML='+json.dumps(item)+',150)</script>',
               'empty':'<h1>你的购物袋是空的。</h1>',
+              'actual_empty':'<h1>你的购物袋中没有商品。</h1>',
+              'partial':'<h1>购物袋总计 RMB 6,799.00</h1><button>移除 iPhone</button><div id="items"></div><script>setTimeout(()=>{document.querySelector("button").remove();document.getElementById("items").innerHTML='+json.dumps(item)+'},600)</script>',
               'unknown':'<h1>购物袋正在加载</h1>'}[contents]
         async def serve(route):
             requests.append(route.request.method)
@@ -116,7 +118,56 @@ async def test_loading_bag_is_not_mistaken_for_an_empty_bag(contents):
                     await adapter.resume_cart(config,timeout=.25)
                 assert not adapter.add_attempted
             else:
-                assert await adapter.resume_cart(config)==(contents=='delayed')
-                assert adapter.cart_checked==(contents=='delayed')
+                assert await adapter.resume_cart(config)==(contents in ('delayed','partial'))
+                assert adapter.cart_checked==(contents in ('delayed','partial'))
             assert all(method=='GET' for method in requests) and len(context.pages)==1
         finally:await browser.close()
+
+
+async def test_post_add_transient_empty_state_is_not_a_failed_add():
+    import asyncio,json
+    from app.adapters.bag_state import bag_has_items
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(headless=True);page=await browser.new_page()
+        item='<h1>购物袋总计 RMB 6,799.00</h1><h2>iPhone 17 256GB 白色</h2><label>数量<select><option value="1">1</option></select></label><button>移除 iPhone</button>'
+        await page.set_content('<h1>你的购物袋中没有商品。</h1><script>setTimeout(()=>document.body.innerHTML='+json.dumps(item)+',1200)</script>')
+        async def guard(page):pass
+        started=asyncio.get_running_loop().time()
+        try:
+            assert await bag_has_items(page,Control(False),guard,timeout=4,expect_items=True)
+            assert asyncio.get_running_loop().time()-started>=2
+        finally:await browser.close()
+
+
+@pytest.mark.parametrize('quantity',[1,2])
+async def test_add_waits_for_quantity_save_and_does_not_rewrite_unchanged_quantity(quantity):
+    import asyncio,json
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(headless=True);context=await browser.new_context();page=await context.new_page()
+        saved=asyncio.Event();quantity_posts=[]
+        bag='''<h1 id="total">购物袋总计 RMB 6,799.00</h1><h2>iPhone 17 256GB 白色</h2>
+          <label>数量<select onchange="window.quantityChanges++;fetch('/shop/bag/quantity',{method:'POST'}).then(()=>document.getElementById('total').innerText='购物袋总计 RMB 13,598.00')"><option value="1">1</option><option value="2">2</option></select></label>
+          <button>移除 iPhone</button><button>结账</button><script>window.quantityChanges=0</script>'''
+        async def serve(route):
+            path=route.request.url
+            if path.endswith('/shop/bag/quantity'):
+                quantity_posts.append(route.request.method)
+                await asyncio.sleep(.5)
+                await route.fulfill(content_type='application/json',body='{}');saved.set()
+            elif path.endswith('/shop/bag'):
+                await route.fulfill(content_type='text/html; charset=utf-8',body=bag)
+            else:
+                await route.fulfill(content_type='text/html; charset=utf-8',body='<button onclick="location.href=\'/shop/bag\'">查看购物袋</button>')
+        await context.route('**/*',serve)
+        await page.goto('https://www.apple.com.cn/shop/buy-iphone/iphone-17')
+        cfg=local_config();cfg.product.name='iPhone 17';cfg.product.quantity=quantity;cfg.product.max_total=str(6799*quantity)
+        cfg.product.options={'dimensionColor':'white','dimensionCapacity':'256gb'}
+        adapter=AppleAdapter(page,Control(False));adapter.add_attempted=True
+        adapter.options_snapshot=[{'name':'dimensionColor','value':'white','label':'白色'},{'name':'dimensionCapacity','value':'256gb','label':'256GB'}]
+        try:
+            await adapter.select_pickup(Availability(Store('Apple 南京东路',store_id='R359'),True,'今天可取货'),cfg)
+            assert adapter.cart_checked and adapter.bag_total==Decimal(6799*quantity)
+            assert quantity_posts==(['POST'] if quantity==2 else [])
+            assert await page.evaluate('window.quantityChanges')==(1 if quantity==2 else 0)
+            if quantity==2:assert saved.is_set()
+        finally:adapter.detach();await browser.close()

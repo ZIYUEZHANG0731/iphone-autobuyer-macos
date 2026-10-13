@@ -151,6 +151,11 @@ class SignInController:
                 raise UserAction('Apple 询问是否信任此浏览器；请在官网自行选择后继续')
             button = frame.get_by_role('button', name=re.compile(r'^(信任|Trust)$', re.I)).filter(visible=True)
             key = (config.credential_id, frame)
+            # The selected button can disappear before its heading during
+            # the normal return navigation. Observe that already-started
+            # transition without revalidating or activating it a second time.
+            if key in self.trust_attempted:
+                return True
             if await heading.count() != 1 or await button.count() != 1:
                 raise UserAction('Apple 的信任浏览器选项无法唯一确认，请自行选择')
             if key not in self.trust_attempted:
