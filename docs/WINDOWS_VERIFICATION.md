@@ -17,6 +17,7 @@
 | 完整源码 | **661 passed / 3 macOS skipped / 441.60 秒** | `reports/windows-source57-clean.xml` |
 | 冻结环境、GUI、内置 renderer、隔离合成单次订单 | 全部退出 0；合成提交与订单各 1 | `reports/windows-release57-self-test.log` |
 | 最终 exe 的编译回执模块 | 从 exe 的 PYZ 读取实际编译模块，实读同一已有 Apple 订单成功；实际提交事件、确认锁各 1 | `reports/windows-frozen57-existing-receipt.json` |
+| 实际新包重开与桌面入口 | v0.7.14 GUI 已正常启动、原配置及 CONFIRMED 锁恢复；同一 intent 的 LIVE 准备检查阻止再次提交；桌面快捷方式指向 release57 | `reports/windows-release57-reopen.json`，本机运行记录页 |
 | 便携 ZIP | **263,995,544 字节**、3,714 唯一条目，CRC 通过，无 profile、账户、订单记录、报告或 Demo | `reports/windows-release57-package.json` |
 
 首轮全量 660 passed / 1 failed / 3 skipped，失败为直接资料测试替身缺少原适配器已有的 `submit_attempted` 字段；补齐替身并加验 Qt 新页后，上述最终全量重新全部通过。最终包为 **`dist/release57/iPhone AutoBuyer Windows v0.7.14.zip`**，SHA256 **`6055e90e376aae10602eb20f33098f0de45153e6c81c1b3c23ffe440bb75b294`**。既有 7:26 连续 Demo 仍为 build 56 的配置至核对实录，不伪造真实提交片段。新版本的回执模块在已创建订单上验证，未用重复实单替代复验；其他付款方案、首次设备验证和首发排队仍按实际场景分别验收。
