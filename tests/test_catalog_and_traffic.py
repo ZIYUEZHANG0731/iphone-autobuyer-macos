@@ -73,7 +73,7 @@ async def test_503_busy_honors_retry_after_without_becoming_541_or_sending_anoth
     async def respond(route):
         gets.append(route.request.method)
         await route.fulfill(status=503 if len(gets)==1 else 200,headers={'retry-after':'1'} if len(gets)==1 else {},
-            content_type='text/html; charset=utf-8',body='<h1>稍后回来</h1>' if len(gets)==1 else '<h1>购买 iPhone 17</h1>')
+            content_type='text/html; charset=utf-8',body='<h1>稍后回来</h1>' if len(gets)==1 else '<h1>购买 iPhone 17</h1><button>继续</button>')
     await context.route('**/*',respond)
     adapter=AppleAdapter(page,Control(False));config=local_config();config.product.url='https://www.apple.com.cn/shop/product/fixture'
     try:
@@ -91,7 +91,7 @@ async def test_expired_entry_delay_does_not_make_541_error_heading_a_success(bro
         gets.append(route.request.method)
         index=len(gets)
         await route.fulfill(status=541 if index==2 else 200,content_type='text/html; charset=utf-8',
-            body='<h1>稍后回来</h1>' if index==1 else '<h1>很抱歉，你要查找的网页找不到。</h1>' if index==2 else '<h1>购买 iPhone 17</h1>')
+            body='<h1>稍后回来</h1>' if index==1 else '<h1>很抱歉，你要查找的网页找不到。</h1>' if index==2 else '<h1>购买 iPhone 17</h1><button>继续</button>')
     await context.route('**/*',respond);adapter=AppleAdapter(page,Control(False));config=local_config()
     config.product.url='https://www.apple.com.cn/shop/buy-iphone/iphone-17'
     try:
@@ -114,7 +114,7 @@ async def test_slow_opening_document_is_allowed_to_finish_without_a_second_navig
             await release.wait();await route.fulfill(content_type='application/javascript',body='void 0;')
         else:
             documents.append(route.request.method)
-            await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>购买 iPhone 17</h1><script defer src="/slow.js"></script>')
+            await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>购买 iPhone 17</h1><button>继续</button><script defer src="/slow.js"></script>')
     await context.route('**/*',respond);config=local_config();config.operation_timeout=.08
     config.product.url='https://www.apple.com.cn/shop/product/fixture';adapter=AppleAdapter(page,Control(False))
     try:
@@ -155,9 +155,9 @@ async def test_real_queue_page_is_observed_without_reloading_and_can_release_its
     context=await browser.new_context();page=await context.new_page();gets=[]
     async def respond(route):
         gets.append(route.request.method)
-        await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>正在排队，请不要刷新</h1><script>setTimeout(()=>document.body.innerHTML="<h1>购买 iPhone 17</h1>",350)</script>')
+        await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>正在排队，请不要刷新</h1><script>setTimeout(()=>document.body.innerHTML="<h1>购买 iPhone 17</h1><button>继续</button>",350)</script>')
     await context.route('**/*',respond);adapter=AppleAdapter(page,Control(False))
-    config=local_config();config.product.url='https://www.apple.com.cn/shop/product/fixture'
+    config=local_config();config.product.url='https://www.apple.com.cn/shop/product/fixture';config.entry_strategy='wait'
     try:
         await adapter.prepare(config);assert not await adapter.is_open();assert adapter.in_queue
         await adapter.reload();assert gets==['GET']
@@ -171,7 +171,7 @@ async def test_missing_product_url_waits_for_observed_store_entry_instead_of_gue
     context=await browser.new_context();page=await context.new_page();gets=[]
     async def respond(route):
         gets.append(route.request.url)
-        await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>选购 iPhone</h1><a href="/shop/buy-iphone/iphone-duo">iPhone Duo</a>' if '/iphone-duo' not in route.request.url else '<h1>购买 iPhone Duo</h1>')
+        await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>选购 iPhone</h1><a href="/shop/buy-iphone/iphone-duo">iPhone Duo</a>' if '/iphone-duo' not in route.request.url else '<h1>购买 iPhone Duo</h1><button>继续</button>')
     await context.route('**/*',respond);adapter=AppleAdapter(page,Control(False));config=local_config()
     config.product=Product(name='iPhone Duo',url='',price_from_website=True,discover_from_store=True)
     try:

@@ -60,7 +60,7 @@ async def test_first_connection_failure_can_retry_the_validated_target_from_blan
         if len(gets)==1:
             await route.abort('connectionfailed')
         else:
-            await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>购买 iPhone 17</h1>')
+            await route.fulfill(content_type='text/html; charset=utf-8',body='<h1>购买 iPhone 17</h1><button>继续</button>')
 
     await context.route('**/*',respond)
     config=local_config();config.product.url='https://www.apple.com.cn/shop/product/offline-fixture'

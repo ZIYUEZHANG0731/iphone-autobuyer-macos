@@ -81,6 +81,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.review_advance_attempted = False
         self.submit_started = None
         self.waiting_for_link=False
+        self.entry_strategy='refresh'
         self.busy_until=0.;self.in_queue=False;self.navigation_pending=False;self.navigation_started=0.
         self.dom_ready=None
         self.page_factory=page_factory
@@ -236,6 +237,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         config.validate(self.mode)
         self.privacy_config=config
         self.discovery_product=config.product
+        self.entry_strategy=config.entry_strategy
         self.waiting_for_link=not config.product.url and config.product.discover_from_store
         self.target_url=config.product.url or 'https://www.apple.com.cn/shop/buy-iphone'
         self.navigation_started=self.refresh_started_at=asyncio.get_running_loop().time()
@@ -293,24 +295,39 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             await self.guard()
             self.progress('product_link',{'name':self.discovery_product.name,'url':link})
         body = await self.page.locator("body").inner_text()
-        self.in_queue=bool(re.search(r'正在排队|排队中|等待室|当前排队|不要刷新|please do not refresh|you are now in line|your place in line|virtual queue',body[:4000],re.I))
+        self.in_queue=bool(re.search(r'正在排队|排队中|等待室|当前排队|不要刷新|请勿关闭(?:此|本)页面|请停留(?:在)?(?:此|本|当前)页面|please do not refresh|please (?:stay|wait|remain) on (?:this|the) page|you are now in line|your place in line|virtual queue',body[:4000],re.I))
         if self.in_queue:return False
         if re.search(r"马上回来|稍后回来|We.?ll be back|商店.{0,8}(维护|暂时关闭)",body,re.I):
             return False
+        current_family=family_url(self.page.url)
+        if not matches_target and not (current_family and current_family==family_url(self.target_url)):
+            return False
         # A published product page with a future preorder notice is not an open checkout.
+        notice=None
         if re.search(r"接受预购|开始预购",body[:3000]):
             # A published preorder date is independent of unselected form fields.
             notice=preorder_time(body[:3000])
             if notice and notice>datetime.now(ZoneInfo('Asia/Shanghai')):return False
-            add=self.page.get_by_role("button",name="添加到购物袋",exact=True)
-            next_step=self.page.get_by_role('button',name='继续',exact=True).filter(visible=True)
-            if not notice and (not await add.count() or not await add.is_enabled()) and (await next_step.count()!=1 or not await next_step.is_enabled()):
-                return False
-        return await self.page.get_by_role("heading",level=1).count() > 0
+        add=self.page.get_by_role("button",name="添加到购物袋",exact=True).filter(visible=True)
+        next_step=self.page.get_by_role('button',name='继续',exact=True).filter(visible=True)
+        add_count=await add.count();next_count=await next_step.count()
+        actionable=(add_count==1 and await add.is_enabled()) or (next_count==1 and await next_step.is_enabled())
+        family=current_family
+        # A preconfigured preorder SKU can still have its disabled Continue
+        # after the advertised time. Keep retrying the entry, not human resume.
+        if notice and family and urlsplit(self.page.url).path.rstrip('/')!=urlsplit(family).path and not add_count and not actionable:
+            return False
+        controls=await self.page.evaluate(CONTROL_SCRIPT) if not actionable else []
+        configurable=any('dimension' in c['name'].lower() and c['visible'] and not c['disabled'] for c in controls)
+        # Unknown launch wording is a retryable entry, not an open store based
+        # solely on an H1. Actual product controls must be usable.
+        return (actionable or configurable) and await self.page.get_by_role("heading",level=1).count()>0
 
     async def reload(self):
         await self.guard(allow_uncommitted=self.browse_unavailable,allow_busy=True)
-        if self.in_queue or self.navigation_pending or asyncio.get_running_loop().time()<self.busy_until:return
+        if urlsplit(self.page.url).path.casefold().startswith(('/shop/bag','/shop/checkout','/shop/signin','/shop/account')):
+            raise UserAction('官网已进入购物袋、结账或账户页面；保留当前流程，不执行入口刷新')
+        if (self.in_queue and self.entry_strategy=='wait') or self.navigation_pending or asyncio.get_running_loop().time()<self.busy_until:return
         self.navigation_started=self.refresh_started_at=asyncio.get_running_loop().time()
         self.dom_ready=False
         try:

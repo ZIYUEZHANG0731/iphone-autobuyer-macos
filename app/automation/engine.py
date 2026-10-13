@@ -126,8 +126,9 @@ class Engine:
                 delay=5.0 if mode!=Mode.LOCAL_TEST else config.interval
                 while not await self.operation(adapter.is_open, opening_deadline=deadline):
                     if time.monotonic()>deadline: raise FlowError("等待商店开放超时")
-                    if getattr(adapter,'in_queue',False) or getattr(adapter,'navigation_pending',False):
-                        notice='官网正在排队，保留当前页面等待放行' if getattr(adapter,'in_queue',False) else '官网正在加载，等待当前请求完成'
+                    queued=getattr(adapter,'in_queue',False)
+                    if getattr(adapter,'navigation_pending',False) or (queued and config.entry_strategy=='wait'):
+                        notice='官网正在加载，等待当前请求完成' if getattr(adapter,'navigation_pending',False) else '官网显示等待进店，按所选策略保留页面等待放行'
                         if self.message!=notice:self.emit(State.STORE_UNAVAILABLE,notice)
                         await self.control.sleep(1)
                         continue
@@ -135,10 +136,11 @@ class Engine:
                     busy_left=max(0,getattr(adapter,'busy_until',0)-now)
                     last=getattr(adapter,'refresh_started_at',last_refresh_started)
                     # Five seconds between starts, including time already spent
-                    # loading. Never interrupt an in-flight request or a queue.
+                    # loading. Do not interrupt navigation; a waiting-page GET
+                    # follows the user's refresh/wait preference.
                     wait=max(0,last+delay-now,busy_left)
                     if now+wait>=deadline:raise FlowError('等待商店开放超时')
-                    self.emit(State.STORE_UNAVAILABLE,f"官网未开放或暂时拥堵；{wait:.1f} 秒后检查当前页面，登录会话保留")
+                    self.emit(State.STORE_UNAVAILABLE,f"{'官网显示等待进店，按所选策略刷新入口' if queued else '官网未开放或暂时拥堵'}；{wait:.1f} 秒后重试，登录会话保留")
                     await self.control.sleep(wait)
                     if hasattr(adapter,'reload'):
                         last_refresh_started=time.monotonic()
