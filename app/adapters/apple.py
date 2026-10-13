@@ -89,6 +89,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.guest_attempted=False
         self.pickup_continue_attempted=False
         self.checkout_last_continued=''
+        self.checkout_pickup_confirmed=None
         self.checkout_continued_stores=set()
         self.checkout_more_attempted=False
         self.checkout_observed_stage=None
@@ -102,6 +103,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
 
     def _dom_loaded(self,*_):
         self.dom_ready=True
+        if not urlsplit(self.page.url).path.startswith('/shop/checkout'):
+            self.checkout_pickup_confirmed=None
 
     def detach(self):
         self.checkout_updates.detach()
@@ -111,7 +114,9 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
     def bind_page(self,page):
         changed=page is not self.page
         self.detach();self.page=page;self.dom_ready=None;self.last_document_status=200
-        if changed:self.auth_service_status=None
+        if changed:
+            self.auth_service_status=None
+            self.checkout_pickup_confirmed=None
         self.checkout_updates.attach(page)
         page.on('response',self._response);page.on('domcontentloaded',self._dom_loaded)
 
@@ -753,6 +758,12 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         while stage in ('pickup','pickup_unavailable'):
             await self._select_checkout_pickup(config)
             stage=await self._wait_checkout_stage(wanted=('contact','payment','pickup_unavailable'),timeout=15)
+        if stage in ('contact','payment') and self.checkout_last_continued:
+            await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout))
+            if self.selected and self.selected.store.store_id==self.checkout_last_continued:
+                # A checked store plus its completed save and successful
+                # continuation is checkout evidence, not an inventory quote.
+                self.checkout_pickup_confirmed=(self.page,deepcopy(self.selected.store))
         if stage=='contact':
             await self.inspect_customer_fields()
             if self.identity_filled:
@@ -919,17 +930,17 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         actual_months=int(months[1]) if months else 0
         if actual_months!=config.installment_months:
             raise FlowError('最终核对页分期期数与授权不一致')
-        store_visible=self.selected.store.name in body
+        store=await self.review_pickup_store(body)
+        store_visible=store.name in body
         self.progress('review',{'product':title,'quantity':int(q[1]),'total':str(value),
             'payment':self.payment,'installment_months':actual_months,
-            'store_last_selected':self.selected.store.name,'store_visible_in_review':store_visible,
+            'store_last_selected':store.name,'store_visible_in_review':store_visible,
+            'store_confirmation':'checkout_saved',
             'submit_clicked':False})
-        # The tested Review page omits the store name and says its pickup date is
-        # determined after payment. Do not turn a prior availability quote into a guarantee.
-        if not store_visible or config.pickup_from or config.pickup_to:
-            raise UserAction('已到官网最终核对，商品、数量、总金额及付款方案已校验；本页门店或最终取货日期仍需人工确认。试跑未提交订单')
+        if config.pickup_from or config.pickup_to:
+            raise UserAction('官网最终取货日期尚不能验证是否满足设置的日期范围；当前购物袋保留，未提交订单')
         return Summary(config.product.name,dict(config.product.options),int(q[1]),value,
-            self.selected.store.name,self.selected.store.store_id,self.payment,
+            store.name,store.store_id,self.payment,
             verified=True,installment_months=actual_months)
 
     async def submit(self,config):

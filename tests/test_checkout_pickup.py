@@ -157,6 +157,7 @@ async def test_failed_store_update_preserves_the_bag_and_does_not_click_continue
         await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
     assert await page.evaluate('window.pickupClicks')==0
     assert not adapter.pickup_continue_attempted and not adapter.add_attempted
+    assert adapter.checkout_pickup_confirmed is None
     assert page.url.endswith('Fulfillment-init')
 
 

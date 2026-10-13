@@ -154,7 +154,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.label(c,'向 Apple 中国大陆官网填写已提供的姓名、联系方式和证件后四位。','muted');c.addWidget(divider())
         self.auto=QCheckBox('条件满足后自动提交订单');self.auto.setAccessibleName('允许在预设条件满足时自动提交真实订单');c.addWidget(self.auto)
         self.label(c,'仅用于真实购买。商品、数量、金额、门店和付款方案须通过最终核对；付款由你完成。','muted');c.addStretch()
-        self.label(c,'自动提交目前只支持招商银行 24 期；官网缺少最终门店信息时，仍会请你核对。','muted')
+        self.label(c,'自动提交目前只支持招商银行 24 期。门店在官网选择并保存后确认，最终页无需再次显示门店名。','muted')
         self.label(c,'官网模拟下单会在最终核对时停止。','muted');row.addWidget(frame,1);l.addLayout(row)
         frame,c=self.card();c.addLayout(section_header('Apple 隐私声明 · 提前同意'));c.addWidget(divider())
         self.label(c,'默认自动勾选 Apple 中国大陆结账的两个隐私选项并继续，不弹出二次确认窗口。','muted')

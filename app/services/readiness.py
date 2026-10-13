@@ -101,8 +101,8 @@ def preparation_items(config: Settings, *, mode: Mode = Mode.LIVE,
     else:
         add('order', '购买计划', 'ready', '当前计划没有订单提交记录；下单时仍会原子锁定以防重复', 3, '查看购买授权')
 
-    add('handoff', '最终核对与下单', 'manual',
-        '官网试跑由你核对后决定是否下单' if mode == Mode.WEBSITE_DRY_RUN else
-        '已允许自动提交，仍须通过全部最终校验；目前实测页面缺门店时会暂停' if config.auto_submit else
+    add('handoff', '最终核对与下单', 'ready' if mode == Mode.LIVE and config.auto_submit else 'manual',
+        '官网试跑到核对页自动结束，不创建订单' if mode == Mode.WEBSITE_DRY_RUN else
+        '已允许自动提交：门店保存及最终商品、数量、金额、付款方案核对通过后下单；付款由你完成' if config.auto_submit else
         '自动提交未启用：软件完成购买准备后由你在官网核对并下单', 3, '查看购买授权')
     return items

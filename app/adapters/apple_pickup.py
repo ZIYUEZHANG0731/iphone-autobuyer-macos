@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from playwright.async_api import Error as PlaywrightError, expect
 from app.adapters.checkout_state import checkout_state
-from app.models.flow import Availability, UserAction
+from app.models.flow import Availability, FlowError, UserAction
 
 
 def pickup_date(quote):
@@ -54,6 +54,7 @@ class ApplePickup:
 
     async def _select_checkout_pickup(self,config):
         if not self.selected:raise UserAction('本次任务尚未核对目标取货门店，请重新检查库存')
+        self.checkout_pickup_confirmed=None
         await self.focus_control(self.page)
         pickup=self.page.get_by_role('radio',name=re.compile(r'^(我要)?取货(?:\s|$)')).filter(visible=True)
         if await pickup.count()==1:await self._check_radio(pickup)
@@ -128,3 +129,22 @@ class ApplePickup:
                 raise UserAction('取货门店继续的结果尚未确认；当前购物袋保留，不重复点击') from None
             self.progress('checkout_pickup',{'store':store.name,'store_id':store.store_id,'message':'已核对结账取货门店，等待取货资料页'})
             return
+
+    async def review_pickup_store(self,body):
+        confirmed=self.checkout_pickup_confirmed
+        if not confirmed or confirmed[0] is not self.page or not self.selected:
+            raise UserAction('本次结账取货门店尚未由官网确认；购物袋保留，请完成门店选择后继续')
+        store=confirmed[1]
+        if (store.store_id!=self.selected.store.store_id or store.name!=self.selected.store.name
+                or not self.selected.available):
+            raise UserAction('本次结账取货门店已变化，需重新通过官网确认；购物袋保留')
+        pickup=self.page.get_by_role('link',name=re.compile(r'^更改零售店(?:\s|$)')).filter(visible=True)
+        if await pickup.count()!=1:
+            raise UserAction('最终核对页无法确认自提方式；购物袋保留，未提交订单')
+        # The actual Review omits the name but retains its pickup edit link.
+        # Visible contradictory store information must still reject submission.
+        normalized=re.sub(r'\s+','',body)
+        if any(row['store_id']!=store.store_id and re.sub(r'\s+','',row['name']) in normalized
+               for row in self.store_directory.rows):
+            raise FlowError('最终核对页门店与官网已保存的取货选择不一致')
+        return store

@@ -50,6 +50,16 @@ def test_old_order_blocks_new_live_purchase_but_allows_dry_run():
     assert 'W1234567890' not in live['order'].detail
 
 
+@pytest.mark.parametrize(('mode','authorized','expected'),[
+    (Mode.LIVE,True,'ready'),(Mode.LIVE,False,'manual'),(Mode.WEBSITE_DRY_RUN,True,'manual'),
+])
+def test_preparation_distinguishes_automatic_live_submission_from_trial(mode,authorized,expected):
+    config=configured();config.auto_submit=authorized
+    handoff=next(i for i in preparation_items(config,mode=mode) if i.key=='handoff')
+    assert handoff.status==expected
+    assert '页面缺门店' not in handoff.detail
+
+
 def test_legacy_timezone_preserves_exact_instant_and_beijing_only_display():
     berlin = datetime(2026, 10, 16, 14)
     china = convert_wall_time(berlin, 'Europe/Berlin', 'Asia/Shanghai')

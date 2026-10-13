@@ -25,7 +25,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         from app.automation.browser import BrowserSession
         from app.automation.control import Control
         from app.adapters.apple import AppleAdapter
-        from app.models.config import Settings, Store, Identity
+        from app.models.config import Settings, Store, Identity, Mode
         from app.models.flow import Availability
         from app.models.credential import AppleCredential
         from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_MORE, NOTICE_VERSION
@@ -106,6 +106,30 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     config=Settings(stores=[Store('Apple 南京东路',store_id='R359')],transmit_identity=True)
                     await adapter.fill_customer(Identity('格式测试','居民身份证后四位','123X','00000000000','format@example.com','格','式测试'),config)
                     assert adapter.identity_filled and await session.page.evaluate('window.continues')==1
+                    # Real Qt submit input must work from a hidden window with
+                    # a checkout-confirmed store omitted from the Review text.
+                    receipts=[]
+                    async def receipt_fixture(route):
+                        receipts.append('synthetic-confirmation')
+                        await route.fulfill(content_type='text/html; charset=utf-8',body="""<h1>你的订单正在等待付款</h1>
+                          <p>请在 30 分钟内完成付款</p><a href="#fixture">订单 #W1234567890</a>""")
+                    await session.context.route('**/shop/checkout/thankyou',receipt_fixture)
+                    await session.page.set_content("""<main><h1>准备下单了吗？</h1>
+                      <h2>取货日期待付款完成后确定。</h2><a href="#pickup">更改零售店</a>
+                      <li data-autom="bag-item-fixture"><h2>iPhone 17</h2><p>数量 1</p></li>
+                      <p data-autom="bagtotalvalue">RMB 6,799</p><img alt="招商银行">
+                      <p>24 个月，每月约 RMB 284</p>
+                      <button onclick="location.href='/shop/checkout/thankyou'">立即下单</button></main>""")
+                    config.product.name='iPhone 17';config.product.max_total='6799'
+                    config.auto_submit=True;config.payments=['招商银行'];config.installment_months=24
+                    adapter.mode=Mode.LIVE;adapter.payment='招商银行';adapter.installment_months=24
+                    self.browser_hidden.clear();self.hide_browser.emit()
+                    assert await asyncio.to_thread(self.browser_hidden.wait,3)
+                    receipt=await adapter.submit(config)
+                    assert receipt.order_id=='W1234567890' and receipt.status=='payment_pending'
+                    assert (await adapter.reconcile(config)).order_id==receipt.order_id
+                    assert receipts==['synthetic-confirmation']
+                    await session.context.unroute('**/shop/checkout/thankyou',receipt_fixture)
                     # Account recovery in checkout must restore the hidden Qt
                     # view before submitting its normal iframe login button.
                     async def signin_fixture(route):
