@@ -12,6 +12,8 @@
 | 实际便携版／内置浏览器连续录像轮 | **74.45 秒**至 REVIEW_READY / COMPLETED，无人工继续 | `reports/windows-real56-embedded-demo.json` |
 | 实际便携版／软件专用 Chrome 首轮 | **76.50 秒**至 REVIEW_READY / COMPLETED，无人工继续 | `reports/windows-real56-chrome.json` |
 | 共同核对 | 紫色 iPhone 17 / 256GB / 数量 1 / RMB 6,799；环球港自提；支付宝全额、0 期；真实提交 0 | 以上事件和独立当前核对页读取 |
+| 最终重建包冷启动／内置浏览器 | **94.78 秒**从空购物袋自动加购到 REVIEW_READY / COMPLETED；无暂停，无人工继续；受保护账户确认有效 | `reports/windows-release-embedded.json`、`windows-release-cold-embedded-inspect.json` |
+| 最终重建包冷启动／软件专用 Chrome | **78.22 秒**复用已核对的紫色单部购物袋到 REVIEW_READY / COMPLETED；无暂停，无人工继续；受保护账户确认有效 | `reports/windows-release-chrome.json`、`windows-release-cold-chrome-inspect.json` |
 | 最终完整源码 | **653 passed / 3 macOS skipped / 434.96 秒** | `reports/windows-source56-final.xml` |
 | 失败通知收尾后的 GUI 专项 | **22 passed / 1.71 秒**；最终加入 FAILED 托盘提醒 | `reports/windows-release-gui.xml` |
 | 最终冻结包自检 | environment、GUI、内置 renderer 和隔离合成单次订单全部退出 0；合成提交／订单各 1 | `reports/windows-release-self-test.log` |
@@ -19,6 +21,8 @@
 首轮 build 55 的内置试跑因慢保存暂停，人工继续后到核对；它只用作诊断，不列为挂机通过。修复后上述 build 56 两轮均自动完成。曾出现白色与紫色混合购物袋，保护拒绝继续；没有放宽商品或数量核对。
 
 追加 macOS 首页处理并冷重开 Chrome 后，官网购物袋返回**白色 iPhone 17 × 1**，配置仍为紫色。软件正确报告「购物袋商品配置与选中配置不一致」，真实提交仍为 0。该次是保护停止，不能列作自动核对成功；恢复所选测试购物袋需明确确认，不自动删除非目标商品。首轮成功与冷重开时的购物袋状态分别留证。
+
+用户明确允许整理为紫色 1 部后，先读取当前官网状态：内置会话的购物袋为空，最终包自行按配置加购并在 94.78 秒自动完成核对。随后正常关闭自动化会话、重开软件专用 Chrome；该会话受保护账户页确认有效，当前购物袋已为紫色 1 部、RMB 6,799，所以没有执行移除动作。沿该购物袋在 78.22 秒自动完成核对，没有重复加购。两次最终包复验均无 PAUSED，真实提交均为 0；原白色购物袋停止记录保留，不推断其状态变化的原因。
 
 本轮恢复规则仅针对失败的购物袋／结账**文档 GET**，最多三次 5／10／20 秒，并遵守服务器更长等待；认证、购买 POST 和提交不自动重发。账户验证正常返回后自动观察继续，取货手机验证仍由本人完成并请求继续。预约账户模式启动及开售前十分钟确认有效登录；启动标签超时和停止响应也补齐。失败、暂停、待付款和未知订单结果均提醒，持久订单锁保留。
 
