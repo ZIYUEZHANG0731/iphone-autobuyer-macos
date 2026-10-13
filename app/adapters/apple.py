@@ -26,7 +26,7 @@ from app.adapters.controls import ensure_checked
 from app.adapters.checkout_state import checkout_state, review_state
 from app.adapters.checkout_updates import CheckoutUpdates
 from app.adapters.apple_pickup import ApplePickup, pickup_date
-from app.adapters.bag_state import bag_has_items
+from app.adapters.bag_state import bag_has_items, bag_details, BagConfigurationMismatch
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
 from copy import deepcopy
@@ -52,7 +52,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
     @property
     def supports_submit(self):
         return bool(self.payment)
-    def __init__(self, page: Page, control: Control, *, mode=Mode.WEBSITE_DRY_RUN, progress=None, public_screenshot: Path|None=None, page_factory=None, page_closer=None, login_config=None, credential_provider=None, sign_in=None, page_focus=None):
+    def __init__(self, page: Page, control: Control, *, mode=Mode.WEBSITE_DRY_RUN, progress=None, public_screenshot: Path|None=None, page_factory=None, page_closer=None, login_config=None, credential_provider=None, sign_in=None, page_focus=None, prepare_bag=False):
         self.page = page
         self.control = control
         self.mode = mode
@@ -71,6 +71,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.installment_months = 0
         self.cart_checked = False
         self.add_attempted = False
+        self.prepare_bag=prepare_bag
+        self.bag_save_attempted=False
         self.public_screenshot = public_screenshot
         self.options_snapshot = []
         self.browse_unavailable = False
@@ -652,10 +654,20 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         # Some products show the accessory attachment page; only its bag button is allowed.
         if '/shop/bag' not in self.page.url:
             try:
-                await self.page.get_by_role('button',name='查看购物袋',exact=True).wait_for(timeout=8000)
-                await self.page.get_by_role('button',name='查看购物袋',exact=True).click()
+                # Navigation can finish after click() returns. Observe either
+                # direct bag arrival or the attachment CTA, including slow loads.
+                # A hidden Qt view need not run animation-frame callbacks.
+                await self.page.wait_for_function(r'''() => location.pathname.replace(/\/$/,'')==='/shop/bag' ||
+                  Array.from(document.querySelectorAll('button,[role="button"]')).some(e=>
+                    !!e.getClientRects().length && getComputedStyle(e).visibility!=='hidden' &&
+                    (e.getAttribute('aria-label') || e.innerText || '').replace(/\s+/g,' ').trim()==='查看购物袋')''',
+                    polling=100,timeout=max(45000,int(config.operation_timeout*1000)))
+                await self.guard()
+                if urlsplit(self.page.url).path.rstrip('/')!='/shop/bag':
+                    await self.page.get_by_role('button',name='查看购物袋',exact=True).click()
             except PlaywrightTimeout:
-                raise UserAction("官网加购后的页面已变化，请在浏览器打开购物袋后继续") from None
+                await self.guard()
+                raise UserAction('加购后的购物袋入口尚未载入；页面保留，不重复加购，请稍后继续检查') from None
         await self.page.wait_for_url(re.compile(r'/shop/bag'),timeout=30000)
         await self.guard()
         if not await bag_has_items(self.page,self.control,self.guard):
@@ -683,8 +695,25 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             if urlsplit(bag.url).path.rstrip('/')!='/shop/bag':
                 await self.guard(bag)
                 raise UserAction('官网购物袋跳转尚未完成，请核对当前页面；不会再次加购')
-            if not await bag_has_items(bag,self.control,self.guard,timeout=timeout):return False
-            await self._validate_bag(config,bag)
+            if not await bag_has_items(bag,self.control,self.guard,timeout=timeout):
+                if self.bag_save_attempted:await self._restore_product(config)
+                return False
+            try:
+                await self._validate_bag(config,bag)
+            except BagConfigurationMismatch:
+                if not self.prepare_bag:
+                    raise UserAction('购物袋中是之前选择的配置；请先将旧商品移入收藏，当前购物袋保留') from None
+                evidence=await bag_details(bag)
+                await self.page.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+                if not await bag_has_items(self.page,self.control,self.guard,timeout=timeout):
+                    await self._restore_product(config);return False
+                try:
+                    await self._validate_bag(config)
+                except BagConfigurationMismatch:
+                    if await bag_details(self.page)!=evidence:
+                        raise UserAction('准备时购物袋已变化；当前页面保留，不自动整理') from None
+                    await self._save_previous_configuration(config,evidence)
+                    return False
             # There is no stock requirement here: fulfillment will read the
             # current allowed stores from checkout, without re-adding the item.
             self.add_attempted=True
@@ -705,6 +734,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
 
     async def _validate_bag(self,config,page=None):
         page=page or self.page
+        await self.inspect_bag(config,page)
         title=await page.get_by_role('heading',level=1).inner_text()
         match=re.search(r'总计\s*RMB\s*([\d,]+(?:\.\d+)?)',title)
         if not match or money(match[1])<=0:
@@ -727,10 +757,65 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         # Semantic bag line must still contain the selected human-readable labels.
         for c in await self.options_for_bag(config):
             if normalized(c) not in normalized(matching[0]):
-                raise FlowError("购物袋商品配置与选中配置不一致")
+                raise BagConfigurationMismatch("购物袋商品配置与选中配置不一致")
         await self.accept_price(config,money(match[1]))
         self.bag_total=money(match[1])
         self.progress('bag',{'product':matching[0],'quantity':config.product.quantity,'total':str(self.bag_total),'store':self.selected.store.name if self.selected else ''})
+
+    async def _restore_product(self,config):
+        await self.page.goto(config.product.url,wait_until='domcontentloaded')
+        await self.select_product(config)
+
+    async def _save_previous_configuration(self,config,evidence):
+        # Only the isolated app-owned bag can be prepared automatically. The
+        # validator already checked one exact model and the configured quantity;
+        # require a published target SKU and a different, unambiguous actual SKU.
+        target=re.fullmatch(r'/shop/buy-iphone/iphone-[a-z0-9-]+/([a-z0-9]{5,16})/a/?',urlsplit(config.product.url).path,re.I)
+        if not target or len(evidence['skus'])!=1 or evidence['skus'][0]==target[1].lower()+'/a':
+            raise UserAction('旧配置的 SKU 无法确认，购物袋保留；请核对商品后继续')
+        if self.bag_save_attempted:
+            raise UserAction('旧商品移入收藏已尝试；结果尚未确认，不重复操作或加购')
+        items=self.page.locator('li[data-autom^="bag-item-"]')
+        if await items.count()!=1:
+            raise UserAction('旧商品无法唯一定位，购物袋保留')
+        save=items.get_by_role('button',name=re.compile(r'^移入收藏(?:\s|$)')).filter(visible=True)
+        if await save.count()!=1 or not await save.is_enabled():
+            raise UserAction('官网未提供可恢复的“移入收藏”操作；旧购物袋保留')
+        await self.focus_control(self.page)
+        self.bag_save_attempted=True
+        await save.click()
+        deadline=asyncio.get_running_loop().time()+max(30,config.operation_timeout)
+        while asyncio.get_running_loop().time()<deadline:
+            self.control.check()
+            await self.guard()
+            if await visible_login_form(self.page):
+                if not await self.auto_sign_in(self.page,config):
+                    raise UserAction('移入收藏需要官网登录；购物袋保留，不重新加购')
+            if urlsplit(self.page.url).path.rstrip('/')=='/shop/bag':
+                details=await bag_details(self.page)
+                if not details['remove_count']:
+                    if not await bag_has_items(self.page,self.control,self.guard):
+                        self.progress('bag_prepared',{'previous_sku':evidence['skus'][0],
+                            'message':'旧配置已移入官网收藏；准备当前配置，未删除旧商品'})
+                        await self._restore_product(config)
+                        return
+            await self.control.sleep(.15)
+        raise UserAction('旧商品移入收藏尚未确认；页面保留，不重复操作或加购')
+
+    async def inspect_bag(self,config,page=None):
+        page=page or self.page
+        if urlsplit(page.url).path.rstrip('/')!='/shop/bag':
+            raise FlowError('商品诊断只允许读取官网购物袋')
+        selected=[]
+        for key,value in config.product.options.items():
+            if not re.search(r'color|capacity',key,re.I):continue
+            selected.append({'name':key,'value':value,'labels':[c['label'] for c in self.options_snapshot
+                if c['name']==key and (c['value']==value or c['label']==value)]})
+        data={'actual':await bag_details(page),'expected':{'product':config.product.name,
+            'url':config.product.url.split('?')[0].split('#')[0],'quantity':config.product.quantity,
+            'options':selected,'labels':await self.options_for_bag(config)}}
+        self.progress('bag_diagnostic',data)
+        return data
 
     async def options_for_bag(self,config):
         result=[]

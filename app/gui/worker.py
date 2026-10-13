@@ -105,6 +105,10 @@ class Worker(QThread):
         if kind=='checkout_observation':
             # Known field titles/button categories only; no field values or DOM dump.
             write_private_json(self.root/'checkout-diagnostic.json',data)
+        if kind=='bag_diagnostic':
+            write_private_json(self.root/'bag-diagnostic.json',data)
+        if kind=='pickup_state':
+            write_private_json(self.root/'pickup-state-diagnostic.json',data)
         self.data.emit(kind, data)
 
     async def environment(self):
@@ -223,7 +227,7 @@ class Worker(QThread):
                 raise UserAction('请在“取货人”直接填写姓名、证件后四位、手机号和邮箱，或导入本机 TXT；不会读取旧钥匙串资料')
             if identity:
                 repo.redactor.register(identity)
-        adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),**login_options)
+        adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),prepare_bag=self.config.browser_kind in ('embedded','chrome'),**login_options)
         self.active_adapter = adapter
         try:
             if self.action in ('website', 'live'):
@@ -277,6 +281,15 @@ class Worker(QThread):
                 await self.capture_payment(session, repo, requested=True)
                 return {'state': 'COMPLETED', 'message': '已读取官网当前付款二维码'}
             self.config.validate(Mode.WEBSITE_DRY_RUN, require_stores=False)
+            if self.action == 'bag':
+                await session.page.goto(self.config.product.url,wait_until='domcontentloaded')
+                await adapter.guard()
+                adapter.options_snapshot=await adapter.options()
+                await session.page.goto('https://www.apple.com.cn/shop/bag',wait_until='domcontentloaded')
+                from app.adapters.bag_state import bag_has_items
+                await bag_has_items(session.page,self.control,adapter.guard)
+                await adapter.inspect_bag(self.config)
+                return {'state':'COMPLETED','message':'已记录购物袋商品、SKU 和预选配置；没有加购或修改购物袋'}
             await session.page.goto(self.config.product.url, wait_until='domcontentloaded')
             await adapter.guard()
             if self.action == 'options':

@@ -197,6 +197,54 @@ async def test_pickup_continue_waits_for_the_store_update_even_when_the_button_s
     assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
 
 
+@pytest.mark.parametrize('outcome',['committed','unavailable','stopped'])
+async def test_delayed_store_dom_commit_is_observed_without_reselecting_or_skipping_a_new_slot(checkout_page,outcome):
+    page=checkout_page;requests=[]
+    async def update(route):
+        requests.append(route.request.method)
+        await asyncio.sleep(.25)
+        await route.fulfill(content_type='application/json',body='{}')
+    await page.route('**/shop/checkout/fulfillment',update)
+    body='''<main><h1>选择取货零售店</h1>
+      <label><input id="preferred" type="radio" name="store" value="R359" onchange="window.selections.push('R359');
+        fetch('/shop/checkout/fulfillment',{method:'POST'}).then(()=>{
+          this.checked=false;document.getElementById('other').checked=true;
+          if(window.outcome==='stopped')return;
+          setTimeout(()=>{
+            if(window.outcome==='unavailable'){this.disabled=true;return}
+            document.getElementById('other').checked=false;this.checked=true;
+            document.getElementById('slots').innerHTML=window.slotHTML;
+          },400)
+        })">2 Apple 南京东路 今天可取货</label>
+      <label><input id="other" type="radio" name="store" value="R390" checked>1 Apple 香港广场 今天可取货</label>
+      <label><input id="backup" type="radio" name="store" value="R401" onchange="window.selections.push('R401')">3 Apple 上海环贸 iapm 今天可取货</label>
+      <div id="slots"></div><button onclick="
+        const choice=document.querySelector('input[name=store]:checked');
+        const slot=document.querySelector('select');
+        if(choice.value==='R390'||(choice.value==='R359'&&(!slot||!slot.value))){window.ignored++;return}
+        window.pickupClicks++;document.querySelector('main').innerHTML=window.contactHTML">继续填写取货详情</button>
+      </main><script>window.selections=[];window.ignored=0;window.pickupClicks=0;window.slotChanges=0</script>'''
+    await page.set_content(body)
+    await page.evaluate('''data=>{window.outcome=data.outcome;window.contactHTML=data.contact;
+      window.slotHTML='<label>签到时段<select required onchange="window.slotChanges++"><option value="" disabled selected>可选时段</option><option value="morning">10:15 – 10:30</option></select></label>'}''',
+      {'outcome':outcome,'contact':CONTACT})
+    adapter=adapter_for(page)
+    config=fallback_settings()
+    if outcome=='stopped':
+        before=monotonic();asyncio.get_running_loop().call_later(.8,adapter.control.cancel_task)
+        with pytest.raises(Stopped):await asyncio.wait_for(adapter.fill_customer(contact(),config),3)
+        assert monotonic()-before<1.7
+        assert await page.evaluate('window.pickupClicks')==0
+        assert await page.evaluate('window.selections')==['R359']
+    else:
+        await asyncio.wait_for(adapter.fill_customer(contact(),config),4)
+        assert adapter.identity_filled and await page.evaluate('window.pickupClicks')==1
+        assert await page.evaluate('window.selections')==(['R359'] if outcome=='committed' else ['R359','R401'])
+        assert await page.evaluate('window.slotChanges')==int(outcome=='committed')
+        assert adapter.selected.store.store_id==('R359' if outcome=='committed' else 'R401')
+    assert await page.evaluate('window.ignored')==0 and requests==['POST']
+
+
 @pytest.mark.parametrize('failure',['server','connection'])
 async def test_failed_store_update_preserves_the_bag_and_does_not_click_continue(checkout_page,failure):
     page=checkout_page

@@ -256,6 +256,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.label(diagnostic_layout,'入口策略在控制台选择；加载中的请求与服务器指定等待仍保留。','muted')
         self.label(diagnostic_layout,'检查浏览器环境；本地异常测试使用合成数据。','muted')
         row=QHBoxLayout();self.button(row,'检查环境',lambda:self.launch_diagnostic('environment'));self.button(row,'安装浏览器',lambda:self.launch_diagnostic('install'));row.addStretch();diagnostic_layout.addLayout(row)
+        self.button(diagnostic_layout,'检查购物袋',lambda:self.launch_diagnostic('bag'))
         row=QHBoxLayout();self.scenario=QComboBox()
         for key,value in SCENARIOS.items():self.scenario.addItem(value,key)
         row.addWidget(self.scenario,1);self.button(row,'本地异常测试',lambda:self.launch_diagnostic('local'));diagnostic_layout.addLayout(row)
@@ -499,7 +500,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.last_state='PREPARING'
         labels={'website':'官网试跑 · 到核对页停止','live':'真实购买','environment':'环境检查','install':'浏览器安装',
                 'login':'预登录','login_check':'登录复核','login_diagnosis':'登录问题诊断','catalog':'商品目录','options':'商品选项',
-                'stores':'门店查询','receipt':'订单核对','local':'本地异常测试 · 合成数据'}
+                'stores':'门店查询','bag':'购物袋诊断','receipt':'订单核对','local':'本地异常测试 · 合成数据'}
         self.banner.setText(labels.get(action,'Apple 官网 · 软件浏览器'))
         self.stack.setCurrentIndex(6 if config.browser_kind=='embedded' and action in ('login','login_diagnosis') else 4);self.message_label.setText('正在启动任务…')
     @Slot(dict)
@@ -571,6 +572,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
                 self.console_log.appendPlainText('检测到本机网络设置变化；登录页与现有会话保留。请在同一官网登录页验证连接结果。')
         elif kind=='checkout_auth':self.console_log.appendPlainText(data['message'])
         elif kind=='bag_reused':self.console_log.appendPlainText(data['message'])
+        elif kind=='bag_prepared':self.console_log.appendPlainText(data['message'])
+        elif kind=='bag_diagnostic':
+            self.console_log.appendPlainText('购物袋实际商品：'+'、'.join(data['actual']['titles'])+
+                '；SKU：'+'、'.join(data['actual']['skus']))
+            self.console_log.appendPlainText('预选配置：'+'、'.join(data['expected']['labels']))
         elif kind=='pickup_changed':self.console_log.appendPlainText('结账取货门店已切换：'+data['previous']+' → '+data['store']+'；购物袋商品保留')
         elif kind=='checkout_pickup':self.console_log.appendPlainText(data['message']+'：'+data['store'])
         elif kind=='checkout_page':
