@@ -34,7 +34,10 @@ class AppleLogin:
             if login is not None:
                 # The website owns the destination, SSI and redirect context.
                 # Click the actual menu link; do not persist or replay its URL.
-                await login.click(timeout=5000)
+                # The official redirect can finish after five seconds. Allow
+                # it to complete without abandoning the already-opened form
+                # or clicking the login link a second time.
+                await login.click(timeout=15000)
                 await page.wait_for_load_state('domcontentloaded',timeout=15000)
                 await self.login_guard(page)
                 return

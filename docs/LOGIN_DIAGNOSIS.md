@@ -1,5 +1,16 @@
 # Apple 登录诊断
 
+## Windows：2026-10-13，build 48
+
+本轮找到并修复了一个真实的自动登录停止点：IDMS 在账户第一步保留了非零尺寸的密码输入框，但其祖先区域为 `aria-hidden="true"`、高度为 0。旧实现只检查 Playwright 的 CSS 可见性，提前填写隐藏密码框并将第一步“继续”误记为密码提交；官网返回初始化 200 后进入真正的密码步骤，软件却不再点击登录。这与服务器拒绝认证是两个不同阶段。
+
+- `visible_password()` 同时排除自身或祖先明确声明隐藏的输入框。先沿账户“继续”进入密码步骤，再填写和提交一次。合成夹具复现隐藏区域仍被 CSS 可见性匹配，验证隐藏阶段无密码填写、账户继续一次、密码提交一次，以及后续检查无重复提交。Playwright 的可见性定义见[官方文档](https://playwright.dev/python/docs/actionability#visible)。
+- Windows 的另一个客户端停顿来自原生窗口遮挡：只读观察发现自有 Chrome 窗口状态为 normal、页面焦点为 true，但 `document.visibilityState` 为 hidden，正常点击没有触发事件。软件仅在 Windows 启动其专用 Chrome 时加入 `--disable-backgrounding-occluded-windows`；对照中页面转为 visible，正常单选点击产生一次可信的 click/change，`navigator.webdriver` 仍为 false。新增实际 Chrome 被独立不透明 Qt 窗口完全覆盖的回归，验证动画帧继续、正常控件只选中一次。该选项保持窗口渲染，不修改认证地址、UA、代理或页面脚本；不能据此宣称服务器 503 已消除。机制见 [Chromium 原生遮挡文档](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/docs/windows_native_window_occlusion_tracking.md)。
+- 购物袋登录链接的单次导航等待从 5 秒改为 15 秒，与已有账户入口保持一致；5.5 秒响应夹具验证仍只点击一次、不提前填写密码。现场第一次停止发生在入口导航之后、填写之前；只读检查确认各登录表单仍为空。
+- 用户授权使用本次凭据后，build 47 当前会话在 **15:49:15 Europe/Berlin** 的账户继续获得中国区认证初始化 200 / JSON，却停在密码步骤。通过应用原有的正常按钮动作完成同一流程剩余的一次密码提交后，**15:53:19** 中国区 `idmsa.apple.com.cn` 仍返回 **503 / HTML**，官网显示无法验证身份。没有第二次密码提交、私有认证 API、Cookie 复制、代理切换或订单提交。这个结果验证了客户端停止点，但**尚未解决服务器认证失败**。
+- 已重新打开官方扩展连接页，Windows 窗口清单确认 `Welcome - Google Chrome`；复用日常 Chrome 仍需要完成扩展的实际页面选择，新的受保护账户检查和最终核对页均未通过。
+- 扩展页面选择的等待改为最多 10 分钟，界面指出 Welcome 页并显示时限，避免正常等待过程中 2 分钟即断开。停止动作仍可取消连接并结束本次中继。
+
 ## Windows：2026-10-13，build 47
 
 Windows 的真实认证提交仍有 503，根因尚未确认。用户报告日常 Chrome 可以正常登录；本轮软件已经通过官方扩展接入日常 Chrome，但新的受保护账户读取和实际结账仍要求认证。不能把 Mac 的成功记录直接当作 Windows 登录通过。

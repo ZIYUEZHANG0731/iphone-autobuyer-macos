@@ -8,7 +8,7 @@ from playwright.async_api import Error as PlaywrightError, expect
 from app.models.config import apple_url
 from app.models.flow import UserAction
 from app.services.login import (apple_auth_url, shop_signin_url,
-    store_page_url, follow_store_account, authenticated_account_page)
+    store_page_url, follow_store_account, authenticated_account_page, visible_password)
 
 
 ACCOUNT_LABEL = re.compile(r'Apple\s*(账户|ID)|电子邮件|邮件地址|邮箱|电话号码|Email|phone', re.I)
@@ -52,7 +52,7 @@ async def sign_in_form(page):
     forms = []
     for frame in await auth_frames(page):
         account = frame.get_by_role('textbox', name=ACCOUNT_LABEL).filter(visible=True)
-        password = frame.locator('input[type="password"]').filter(visible=True)
+        password = visible_password(frame)
         if await account.count() or await password.count():
             if await account.count() > 1 or await password.count() > 1:
                 raise UserAction('官网账户表单无法唯一确认，请在浏览器处理')

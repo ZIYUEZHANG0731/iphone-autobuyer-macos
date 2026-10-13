@@ -147,7 +147,7 @@ class Worker(QThread):
         # This retains session-only cookies, which may disappear on a restart.
         with ProcessLock(repo.path.with_suffix('.run.lock')):
             if self.config.browser_kind=='daily_chrome':
-                self.status('请在日常 Chrome 的官方扩展连接页选择 Apple 中国商店页面并允许本次连接…')
+                self.status('请在日常 Chrome 的 Welcome 连接页选择 Apple 中国商店页面并允许本次连接；等待最多 10 分钟，可随时停止…')
             async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless,embedded=self.embedded,
                     kind=self.config.browser_kind,stop_check=self.control.check_session) as session:
                 self.session_open=True

@@ -4,6 +4,10 @@
 
 ## 环境与可运行产物
 
+### v0.7.6 / build 48 Windows 登录步骤与窗口遮挡
+
+最终完整回归 **547 passed / 3 macOS skipped / 292.10 秒**。修正 IDMS 祖先声明隐藏的密码框误识别、购物袋慢导航等待，以及 Windows 专用 Chrome 完全被其他窗口覆盖时暂停渲染造成的正常点击停顿。实际不透明 Qt 覆盖窗口的离线测试确认动画帧继续、单选操作触发一次可信事件，浏览器原生 webdriver 状态保留。官方扩展选择页等待改为 10 分钟且仍可取消。用户授权的单次真实中国区认证提交仍返回 **503 / HTML**；没有新增 Apple 订单或付款，最终核对页未通过。细节见 [登录诊断](LOGIN_DIAGNOSIS.md) 和 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。
+
 ### v0.7.6 / build 47 Windows 登录检查与分发
 
 Windows 最终完整回归 **544 passed / 3 macOS skipped / 281.17 秒**，冻结环境、GUI、内置 renderer 和合成单次订单分发自检全部通过，完整便携 ZIP 已生成。商店/购物袋账户复核沿当前官网入口，Windows 原生网络采样、近期诊断保留和所选页提示均有回归证据。真实日常 Chrome 扩展已接入，但旧安装版账户结账仍要求重新认证；独立 Chrome 认证提交 503 的根因及新版真实核对页结果未确认。没有新增真实 Apple 订单或付款。完整证据与新版包路径见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)，地区、语言和认证请求对照见 [登录诊断](LOGIN_DIAGNOSIS.md)。

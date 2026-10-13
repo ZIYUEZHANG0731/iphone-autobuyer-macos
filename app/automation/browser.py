@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import socket
+import sys
 import time
 from playwright.async_api import async_playwright
 from app.models.flow import FlowError
@@ -66,8 +67,13 @@ class BrowserSession:
         with socket.socket() as listener:
             listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
         (profile/'DevToolsActivePort').unlink(missing_ok=True)
+        # Windows native occlusion stops rendering in a Chrome window covered
+        # by the controller. That also stalls normal actionability checks.
+        # Keep the owned window rendering; browser identity/auth remain native.
+        visibility_args=['--disable-backgrounding-occluded-windows'] if sys.platform=='win32' else []
         self.process=await asyncio.create_subprocess_exec(str(executable),f'--user-data-dir={profile}',
             f'--remote-debugging-port={port}','--remote-debugging-address=127.0.0.1',
+            *visibility_args,
             # Chrome session restoration is also needed for cookies without
             # expiry. Load the profile without restoring old checkout tabs;
             # our normal new_page below creates the visible fresh window.

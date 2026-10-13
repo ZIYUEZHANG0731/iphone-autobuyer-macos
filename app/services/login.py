@@ -172,12 +172,19 @@ def apple_auth_url(url: str) -> bool:
         return False
 
 
+def visible_password(frame):
+    # IDMS keeps a nonzero password input inside its collapsed, aria-hidden
+    # first step. Playwright's CSS visibility alone still matches that input.
+    return frame.locator('input[type="password"]:not([aria-hidden="true"])'
+                         ':not([aria-hidden="true"] input)').filter(visible=True)
+
+
 async def visible_login_form(page) -> bool:
     # Apple commonly renders its login form in an Apple-hosted iframe. This is
     # read-only evidence, never permission to fill credentials off the CN shop.
     for frame in page.frames:
         if not (apple_url(frame.url) or apple_auth_url(frame.url)):continue
-        password = frame.locator('input[type="password"]').filter(visible=True)
+        password = visible_password(frame)
         # Pickup contact fields also contain email/phone labels. Only Apple's
         # auth origin or explicit sign-in path makes those a login signal.
         sign_in = apple_auth_url(frame.url) or shop_signin_url(frame.url)

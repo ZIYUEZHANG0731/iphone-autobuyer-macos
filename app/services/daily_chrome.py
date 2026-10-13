@@ -49,7 +49,7 @@ def selected_apple_page(pages):
 
 
 class DailyChromeBridge:
-    def __init__(self, *, stop_check=None, timeout=120):
+    def __init__(self, *, stop_check=None, timeout=600):
         self.process = None
         self.stop_check = stop_check or (lambda: None)
         self.timeout = timeout

@@ -1,8 +1,51 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import sys
 import pytest
 
 from app.automation.browser import BrowserSession, installed_chrome
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(sys.platform!='win32' or installed_chrome() is None,
+    reason='Windows native Chrome occlusion integration')
+async def test_owned_windows_chrome_remains_interactive_when_covered(tmp_path):
+    async with BrowserSession(tmp_path) as session:
+        await session.context.route('**/*',lambda route:route.fulfill(
+            content_type='text/html',body='''<label><input type="radio">Offline choice</label>
+            <script>window.changes=[];document.querySelector('input').addEventListener('change',e=>changes.push(e.isTrusted));</script>'''))
+        await session.page.goto('https://autobuyer.invalid/occlusion')
+        cdp=await session.context.new_cdp_session(session.page)
+        try:bounds=(await cdp.send('Browser.getWindowForTarget'))['bounds']
+        finally:await cdp.detach()
+        # A temporary opaque Qt window covers only this fixture's Chrome.
+        # It makes Windows' native occlusion reproducible without altering
+        # the user's windows, browser profile or desktop settings.
+        script='''import json,sys
+from PySide6.QtWidgets import QApplication,QWidget
+from PySide6.QtCore import Qt,QTimer
+app=QApplication([]);window=QWidget()
+window.setWindowTitle('AutoBuyer offline occlusion fixture')
+window.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.WindowStaysOnTopHint)
+b=json.loads(sys.argv[1]);window.setGeometry(b['left']-20,b['top']-20,b['width']+40,b['height']+40)
+window.setStyleSheet('background:#eeeeee');window.show()
+QTimer.singleShot(200,lambda:print('READY',flush=True))
+QTimer.singleShot(10000,app.quit);app.exec()
+'''
+        cover=await asyncio.create_subprocess_exec(sys.executable,'-c',script,json.dumps(bounds),
+            stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
+        try:
+            assert (await asyncio.wait_for(cover.stdout.readline(),5)).strip()==b'READY'
+            assert await session.page.evaluate('document.visibilityState')=='visible'
+            assert await asyncio.wait_for(session.page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>resolve(true)))'),3)
+            await session.page.get_by_role('radio',name='Offline choice').check(timeout=3000)
+            assert await session.page.evaluate('changes')==[True]
+            assert await session.page.evaluate('navigator.webdriver') is False
+        finally:
+            if cover.returncode is None:cover.terminate()
+            await cover.wait()
 
 
 @pytest.mark.e2e

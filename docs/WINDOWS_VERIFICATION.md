@@ -1,4 +1,4 @@
-# Windows 第二阶段验收（v0.7.6 / build 47）
+# Windows 第二阶段验收（v0.7.6 / build 48）
 
 日期：2026-10-13。代码基线 `1472e79`，在 `codex/windows-port` 继续；macOS `main` 未改变。第一阶段结果保留在 [Windows 交接](WINDOWS_HANDOFF.md)，本页记录实际 Windows 证据。
 
@@ -92,11 +92,21 @@ build 46 正常重开后，再用原商品、允许门店和付款配置启动�
 | 分发合成订单 | PAYMENT_PENDING、submit_count=1、synthetic_orders=1；未请求 Apple | 上述临时目录 `synthetic-order.json` |
 | ZIP 与冻结模块 | 3,714 唯一条目、CRC 正确、未夹带用户资料；冻结 PYZ 含 Windows 原生网络模块 | 本机静态分发检查 |
 
-最新版为 **`dist/build47/iPhone AutoBuyer Windows v0.7.6.zip`**，263,978,221 字节；SHA256：`e69324a58c1ad5e4c22f70385f67489387f4fd7f0702da196516b0f1a168480b`。build 47 没有重复全新浏览器下载或全新用户验收；build 46 的独立解压验证仍按其原版本记录。
+build 47 包为 **`dist/build47/iPhone AutoBuyer Windows v0.7.6.zip`**，263,978,221 字节；SHA256：`e69324a58c1ad5e4c22f70385f67489387f4fd7f0702da196516b0f1a168480b`。build 47 没有重复全新浏览器下载或全新用户验收；build 46 的独立解压验证仍按其原版本记录。
 
 build 47 增加本轮登录排查修正：商店/购物袋复核沿当前官网账户链接，Windows 原生只读网络采样，关闭页面后保留最近诊断环境，显示实际连接页阶段以及 Chrome 标签组提示。专项登录、过期会话和原页保留检查 **95 passed / 1 macOS skipped**，诊断与 GUI 专项 **74 passed**。初次全量回归有一项可见 Chrome 付款单选控件未选中的失败（535 passed / 1 failed / 3 skipped），随后相应 8 个可见/无头结账案例重跑全通过；最终全量与分发自检结果另列于 build 47 记录。
 
 本轮旧安装版已经成功接入日常 Chrome，但新账户复核和 14:54:30 Europe/Berlin 的实际账户结账仍要求认证，没有新增真实提交。新的账户检查路径取得离线复现与修复证据；尚未把它标成 Apple 503 根因或真实登录修复成功。详情见 [登录诊断](LOGIN_DIAGNOSIS.md)。
+
+## build 48：自动登录步骤与 Windows 窗口遮挡
+
+最终完整源码回归 **547 passed / 3 skipped / 292.10 秒**，仅跳过 macOS 专项；证据 `reports/windows-source-build48-final.xml`。账户登录专项 **84 passed**。Windows 实际 Chrome 结账、会话恢复、诊断专项 **71 passed**；新增不透明 Qt 覆盖窗口的实际可信点击和扩展连接专项 **18 passed**。最初的覆盖夹具误将 Windows CRLF 与 LF 精确比较，已改为按行内容判断，行为断言仍保留；最后的全量再次执行所有用例。
+
+IDMS 第一阶段的密码框祖先 `aria-hidden="true"`、高度为 0，但密码输入框仍有非零尺寸；旧实现提前填写并将账户“继续”误标为密码提交。新版排除明确隐藏的密码控件，顺序执行两个正常步骤。购物袋登录导航等待改为 15 秒，仍仅点击一次。另发现软件专用 Chrome 被其他窗口完全遮挡时为 `visibilityState=hidden`，正常点击无法等待稳定；Windows 启动增加 `--disable-backgrounding-occluded-windows`，完全遮挡下动画帧继续，正常单选产生一次可信 click/change，webdriver 仍为 false。首轮全量在此修复前有 11 个可见 Chrome 失败（535 passed / 11 failed / 3 skipped）；修复后取得上述最终全量结果。不是绕过控件核对或服务器拒绝。
+
+干净 DLL 路径构建成功；最终冻结环境、GUI、内置 renderer 和合成订单自检全部退出 0，合成 PAYMENT_PENDING、submit_count=1、synthetic_orders=1。证据 `reports/windows-build48-final.log`、`windows-self-test48-final.log`，临时隔离目录 `AutoBuyer packaged 7c2b921b-b653-4dd5-9a26-257fffc4f8c5`。冻结 PYZ 静态复核包含新的遮挡参数和隐藏密码过滤。最终分发包 **`dist/build48/iPhone AutoBuyer Windows v0.7.6.zip`**，263,977,251 字节，SHA256 **`b0bd0e44df0b50430689b0e9d55dc894863fdb8be1b1ce9e08b92fa1a4f4c797`**；完整解压运行仍按 build 46 的原有版本证据记录。
+
+用户本轮授权的真实认证初始化返回 200 / JSON，完成同一流程剩余的单次密码提交后仍为 **503 / HTML**。正式提交记录仍为 0，实际核对页未通过。扩展选择页等待延长为 10 分钟并提示 Welcome 页，仍可随时取消；新的日常 Chrome 受保护会话复核尚待完成。详情见 [登录诊断](LOGIN_DIAGNOSIS.md)，本机脱敏报告 `reports/windows-login-investigation-build48.json`。
 
 ## 仍需完成的验收
 

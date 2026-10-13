@@ -161,6 +161,38 @@ async def test_observed_idms_arrow_with_changed_or_delayed_label_submits_once(br
 
 
 @pytest.mark.e2e
+async def test_collapsed_idms_password_is_not_filled_before_account_continuation(browser):
+    body = '''<label>Apple 账户<input id="account"></label>
+        <div id="password-step" aria-hidden="true" style="height:0">
+        <label>密码<input id="password" type="password"></label></div>
+        <button id="sign-in" aria-label="继续" onclick="next()">继续</button>
+        <script>let earlyPassword=false;let accountContinuations=0;
+        document.querySelector('#password').addEventListener('input',()=>{
+            if(document.querySelector('#password-step').getAttribute('aria-hidden')==='true')earlyPassword=true;
+        });
+        function next(){accountContinuations++;const step=document.querySelector('#password-step');
+            step.removeAttribute('aria-hidden');step.style.height='auto';
+            const button=document.querySelector('#sign-in');button.setAttribute('aria-label','登录');
+            button.textContent='登录';button.onclick=()=>submit();}
+        </script>'''
+    f=await fixture(browser,body=body,outcome='<p>等待登录结果</p>',auth_host='idmsa.apple.com.cn')
+    f.config.operation_timeout=2
+    try:
+        # Reproduce the real first-step geometry: CSS visibility matches even
+        # though the password region explicitly declares itself hidden.
+        frame=f.page.frames[1]
+        assert await frame.locator('input[type="password"]').filter(visible=True).count()==1
+        with pytest.raises(UserAction,match='尚未返回明确结果'):
+            await f.adapter.auto_sign_in(f.page)
+        assert len(f.submissions)==1 and len(f.reads)==1
+        # Save counters before the fixture replaces its authentication body.
+        assert await frame.evaluate('({early:earlyPassword,continues:accountContinuations})')=={'early':False,'continues':1}
+        assert await f.adapter.auto_sign_in(f.page) is False
+        assert len(f.submissions)==1
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_two_visible_idms_arrows_still_pause_without_submitting(browser):
     body=ONE_STEP.replace('<button ', '<button id="sign-in" aria-label="登录 Apple Store" ')
     body+='<button id="sign-in" aria-label="登录 Apple Store">另一登录按钮</button>'

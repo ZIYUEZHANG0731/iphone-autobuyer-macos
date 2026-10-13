@@ -54,6 +54,30 @@ async def browser():
         await browser.close()
 
 
+@pytest.mark.e2e
+async def test_slow_signin_navigation_finishes_without_reclick_or_credentials(browser,tmp_path):
+    import asyncio,json
+    target='https://secure9.www.apple.com.cn/shop/signIn?ssi=PRIVATE_SLOW_CONTEXT'
+    context=await browser.new_context();page=await context.new_page();requests=[]
+    async def respond(route):
+        requests.append((route.request.method,route.request.url))
+        if route.request.url==target:
+            await asyncio.sleep(5.5)
+            body=FORM_HTML
+        else:
+            body=STORE_HTML.replace('MENU_JSON',json.dumps('<a href="'+target+'">登录</a>'))
+        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
+    await context.route('**/*',respond)
+    worker=Worker('login',Settings(),tmp_path,interactive=False)
+    try:
+        result=await worker.browser_action(SimpleNamespace(page=page),None)
+        assert result['state']=='PAUSED'
+        assert requests==[('GET',STORE_ENTRY),('GET',target)]
+        assert page.url==target and await visible_login_form(page)
+        assert await page.locator('input[type="password"]').input_value()==''
+    finally:await context.close()
+
+
 async def store_fixture(browser, menu, *, authenticated=False):
     import json
     context = await browser.new_context()
