@@ -306,6 +306,8 @@ class Worker(QThread):
                 return {'state': 'COMPLETED', 'message': '已读取官网自提选项；此结果不代表库存已锁定'}
             raise FlowError('未知检查任务')
         finally:
+            if self.action in ('website','live') and adapter.submit_attempted:
+                session.page=adapter.page
             adapter.detach()
 
     async def watch_payment(self, session, repo):

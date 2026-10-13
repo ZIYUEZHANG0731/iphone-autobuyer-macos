@@ -4,6 +4,8 @@
 
 > 后续 Windows 真机工作已在同分支推进到 **v0.7.13 / build 56**：最终源码 **653 passed / 3 macOS skipped**，保留 macOS `9d9dada` 的共享修复，并迁入最新 `0959596` 的中国官网首页返回处理。内置浏览器及软件专用 Chrome 的实际便携版均自动完成真实官网核对，无人工继续和真实提交；完整连续 Demo 留在本机。最终分发包、独立证据及真实提交的剩余范围见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
 
+最新收尾为 **v0.7.14 / build 57**：Windows 软件专用 Chrome 已按具体授权创建一笔真实订单，用户确认收到短信和邮件；修复支付宝新标签回执识别，新读取在该笔已有订单上通过，原订单锁已确认，不再创建第二单。付款仍由本人完成；具体构建、全量回归与分发结果见上方第二阶段验收。
+
 - 分支：[`codex/windows-port`](https://github.com/ZIYUEZHANG0731/iphone-autobuyer-macos/tree/codex/windows-port)。
 - 适配及测试提交：`f1104f905c754a05a56fbb20850958ef611dae1a`（v0.7.6 / build 44）；本交接文档随后在同分支追加。克隆后用 `git log -2 --oneline` 查看代码提交和文档提交，用 `git rev-parse HEAD` 记录本次验收实际版本。
 - 可回退的已验证 Mac 基线：`05ba1efee6c0b5b21d9ec226c02abd63260c1844`，v0.7.5 / build 43；`main` 仍停在该提交。

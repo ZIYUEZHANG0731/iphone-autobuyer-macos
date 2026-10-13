@@ -128,7 +128,8 @@ async def test_workflow_uses_session_identity_and_credential_without_a_native_re
     config=Settings(profile_id=identity_ref,credential_id=credential_ref,auto_login=True,transmit_identity=True)
     captured={}
     class Adapter:
-        def __init__(self,page,control,**kwargs):captured.update(kwargs)
+        def __init__(self,page,control,**kwargs):
+            self.page=page;self.submit_attempted=False;captured.update(kwargs)
         def detach(self):pass
     @dataclass
     class Result:

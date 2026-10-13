@@ -176,6 +176,9 @@ async def test_offline_submit_uses_one_click_and_reads_real_dom_contract(browser
 
 @pytest.mark.parametrize(('url','title','status'),[
     ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单正在等待付款','payment_pending'),
+    ('https://secure7.www.apple.com.cn/shop/checkout/interstitial','你的订单正在等待付款','payment_pending'),
+    ('https://secure7.www.apple.com.cn/shop/checkout/interstitial','你的订单已取消',None),
+    ('https://wallet-provider.invalid/shop/checkout/interstitial','你的订单正在等待付款',None),
     ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单已收到','confirmed'),
     ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','感谢你的订单','confirmed'),
     ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单已取消',None),

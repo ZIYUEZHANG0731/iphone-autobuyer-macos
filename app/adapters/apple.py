@@ -3,7 +3,7 @@ from app.platforms.files import protect_path
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 from playwright.async_api import Page, Locator, expect, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from app.models.config import Store, Mode, apple_url, money
-from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, Receipt, SubmissionUnknown, RetryableRead
+from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, SubmissionUnknown, RetryableRead
 from app.automation.control import Control
 from app.services.payment import PaymentStore
 from app.services.payment_methods import payment_matches, payment_months, payment_app
@@ -27,6 +27,7 @@ from app.adapters.controls import ensure_checked
 from app.adapters.checkout_state import checkout_state, review_state
 from app.adapters.checkout_updates import CheckoutUpdates
 from app.adapters.apple_pickup import ApplePickup, pickup_date
+from app.adapters.order_receipt import SubmissionReceipts, read_receipt
 from app.adapters.bag_state import bag_has_items
 from app.services.signin import SignInController
 from app.services.stores import StoreDirectory
@@ -82,6 +83,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.submit_attempted = False
         self.review_advance_attempted = False
         self.submit_started = None
+        self.submission_receipts = None
+        self.reviewed_product_title = ''
         self.waiting_for_link=False
         self.entry_strategy='refresh'
         self.busy_until=0.;self.in_queue=False;self.navigation_pending=False;self.navigation_started=0.
@@ -112,6 +115,8 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             self.review_advance_attempted=False
 
     def detach(self):
+        if self.submission_receipts:
+            self.submission_receipts.detach()
         self.checkout_updates.detach()
         self.page.remove_listener('response',self._response)
         self.page.remove_listener('domcontentloaded',self._dom_loaded)
@@ -1013,6 +1018,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             'submit_clicked':False})
         if config.pickup_from or config.pickup_to:
             raise UserAction('官网最终取货日期尚不能验证是否满足设置的日期范围；当前购物袋保留，未提交订单')
+        self.reviewed_product_title = title
         return Summary(config.product.name,dict(config.product.options),int(q[1]),value,
             store.name,store.store_id,self.payment,
             verified=True,installment_months=actual_months)
@@ -1027,6 +1033,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.control.check()
         self.submit_attempted=True
         self.submit_started=datetime.now(timezone.utc)
+        self.submission_receipts=SubmissionReceipts(self.page,self.reviewed_product_title)
         try:
             await self.page.get_by_role('button',name='立即下单',exact=True).click(timeout=15000)
         except PlaywrightError:
@@ -1041,23 +1048,15 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         raise SubmissionUnknown('官网尚未返回可核对的订单号，进入订单核对')
 
     async def _current_receipt(self):
-        # A wallet may redirect to its provider. That is payment handoff, not
-        # Apple order confirmation; keep the once-only lock until confirmed.
-        if not apple_url(self.page.url) or urlsplit(self.page.url).path!='/shop/checkout/thankyou':
+        if not self.submission_receipts:
+            return await read_receipt(self.page,self.submit_started)
+        matched=await self.submission_receipts.read(self.submit_started)
+        if not matched:
             return None
-        order=self.page.get_by_role('link',name=re.compile(r'^订单\s*#[A-Z]\d{8,16}$'))
-        heading=self.page.get_by_role('heading',level=1)
-        if await order.count()!=1 or await heading.count()!=1:
-            return None
-        title=await heading.inner_text()
-        if re.search(r'失败|已取消|已关闭|无法|未能',title):return None
-        pending=bool(re.search(r'订单.*(?:等待付款|尚未付款|未付款|待付款)',title))
-        if not pending and not re.search(r'(?:订单.*(?:已收到|已提交|已确认|正在处理)|(?:感谢|谢谢).*?(?:订单|购买))',title):return None
-        order_id=re.search(r'[A-Z]\d{8,16}',await order.inner_text())[0]
-        text=await self.page.locator('body').inner_text()
-        window=re.search(r'请在\s*(\d+)\s*分钟内完成付款',text)
-        deadline=(self.submit_started+timedelta(minutes=int(window[1]))).isoformat() if window and self.submit_started else None
-        return Receipt(order_id,'payment_pending' if pending else 'confirmed',deadline if pending else None)
+        page,receipt=matched
+        if page is not self.page:
+            self.bind_page(page)
+        return receipt
 
     async def reconcile(self,config):
         # No match by mere confirmation text: a normal Apple order page needs an

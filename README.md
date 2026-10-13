@@ -2,9 +2,11 @@
 
 Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实网站试跑与受条件保护的下单工具。Python / PySide6 / Playwright，支持 macOS Apple Silicon 与 Windows 11 x64。
 
-> Windows 分支 `codex/windows-port` 当前为 **v0.7.13 / build 56**。内置浏览器和软件专用 Chrome 都已由实际便携版自动跑到 Apple 中国商店最终核对页，首轮分别为 79.50 / 74.45 秒及 76.50 秒，没有人工继续或重复加购。共同结果是 iPhone 17 薰衣草紫色 / 256GB / 1 件 / RMB 6,799、环球港自提、支付宝全额付款。最终回归 **653 passed / 3 macOS skipped**，分发自检通过；本轮未创建真实订单。验收证据、最终重建包与真实提交的剩余范围见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md)。
+> Windows 分支 `codex/windows-port` 当前为 **v0.7.14 / build 57**。本机软件专用 Chrome 的正式模式已按具体授权真实创建 **1 笔**紫色 iPhone 17 / 256GB / 1 件 / RMB 6,799、环球港自提、支付宝待本人付款的订单，用户确认收到短信和邮件。原 build 56 提交成功后未识别支付宝新标签回执；build 57 补齐 `/checkout/interstitial` 新页确认、商品关联及付款时限，并在该笔已有订单上验证回执读取，保留原提交锁，没有为复验创建第二单。真实下单、源码和分发证据及场景边界见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md)。
 
-最终重建分发包再经冷启动实跑：内置浏览器从空袋自动加购到核对 **94.78 秒**，软件专用 Chrome 沿已核对购物袋到核对 **78.22 秒**；两轮均无暂停或人工继续，真实提交仍为 0。原白色购物袋与紫色配置不符时正确停止的记录单独保留。
+v0.7.14 最终完整回归 **661 passed / 3 macOS skipped**，冻结环境、GUI、内置 renderer 与隔离合成订单自检通过。exe 中的编译回执模块实读同一已有订单成功；源码和原生 Qt 的新页回执、旧页排除、商品不符与重复提交检查分别留证。
+
+v0.7.13 的最终分发包曾经冷启动实跑：内置浏览器从空袋自动加购到核对 **94.78 秒**，软件专用 Chrome 沿已核对购物袋到核对 **78.22 秒**；两轮均无暂停或人工继续，当时真实提交为 0。原白色购物袋与紫色配置不符时正确停止的记录单独保留。
 
 v0.7.13 修复登录框延迟载入、成功返回 `/store` 或结账取货选择页后的误报，并迁入 macOS `0959596` 的中国官网首页返回处理；仍通过受保护账户页确认登录，首页记住姓名不等于有效登录。预约账户抢购先检查登录，开售前十分钟再检查。官网慢保存成功后自动继续现有步骤，失败保存和订单结果未知时保留购物袋及订单锁。仅失败的购物袋／结账文档 GET 可有限恢复，密码、购买 POST 与订单提交不自动重发。账户验证码由本人完成，软件观察正常验证返回后自动继续；取货手机验证与付款仍按官网提示处理。
 
@@ -72,7 +74,7 @@ v0.6.4 已验证的内置登录修复继续保留。系统中文、地区德国�
 
 ## 启动
 
-Windows 便携版：当前分发包为 **`dist/release/iPhone AutoBuyer Windows v0.7.13.zip`**，其分发及真实官网结果见 Windows 验证记录；正式构建脚本的默认输出仍在 `dist/`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
+Windows 便携版：当前分发包为 **`dist/release57/iPhone AutoBuyer Windows v0.7.14.zip`**，其分发及真实官网结果见 Windows 验证记录；正式构建脚本的默认输出仍在 `dist/`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
 
 Windows 源码开发：
 

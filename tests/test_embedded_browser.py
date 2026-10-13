@@ -125,8 +125,9 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     async def receipt_fixture(route):
                         receipts.append('synthetic-confirmation')
                         await route.fulfill(content_type='text/html; charset=utf-8',body="""<h1>你的订单正在等待付款</h1>
-                          <p>请在 30 分钟内完成付款</p><a href="#fixture">订单 #W1234567890</a>""")
-                    await session.context.route('**/shop/checkout/thankyou',receipt_fixture)
+                          <h2>iPhone 17</h2><p>付款务必在 30 分钟内完成</p><a href="#fixture">订单 #W1234567890</a>""")
+                    receipt_path='/shop/checkout/interstitial' if method=='支付宝' else '/shop/checkout/thankyou'
+                    await session.context.route('**'+receipt_path,receipt_fixture)
                     review="""<main><h1>准备下单了吗？</h1>
                       <h2>取货日期待付款完成后确定。</h2><a href="#pickup">更改零售店</a>
                       <li data-autom="bag-item-fixture"><h2>iPhone 17</h2><p>数量 1</p></li>
@@ -134,17 +135,22 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                       <p>24 个月，每月约 RMB 284</p>
                       <button onclick="location.href='/shop/checkout/thankyou'">立即下单</button></main>"""
                     review=review.replace('alt="招商银行"','alt="'+method+'"').replace('24 个月，每月约 RMB 284',str(actual_months)+' 个月，每月约 RMB 284' if actual_months else '')
+                    if method=='支付宝':
+                        review=review.replace("location.href='/shop/checkout/thankyou'", "window.open('/shop/checkout/interstitial','_blank','noopener')")
                     await session.page.set_content(review)
                     config.product.name='iPhone 17';config.product.max_total='6799'
                     config.auto_submit=True;config.payments=[method];config.installment_months=months
                     adapter.mode=Mode.LIVE;adapter.payment=method;adapter.installment_months=actual_months
                     self.browser_hidden.clear();self.hide_browser.emit()
                     assert await asyncio.to_thread(self.browser_hidden.wait,3)
+                    checkout_page=session.page
                     receipt=await adapter.submit(config)
                     assert receipt.order_id=='W1234567890' and receipt.status=='payment_pending'
                     assert (await adapter.reconcile(config)).order_id==receipt.order_id
                     assert receipts==['synthetic-confirmation']
-                    await session.context.unroute('**/shop/checkout/thankyou',receipt_fixture)
+                    if method=='支付宝':assert adapter.page is not session.page
+                    session.page=adapter.page
+                    await session.context.unroute('**'+receipt_path,receipt_fixture)
                     # Account recovery in checkout must restore the hidden Qt
                     # view before submitting its normal iframe login button.
                     async def signin_fixture(route):
@@ -169,6 +175,10 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     await session.context.unroute('**/*',signin_fixture)
                     adapter.detach()
                     await session.page.goto('https://autobuyer.invalid/embedded')
+                    if checkout_page is not session.page:
+                        # The GUI bridge's reconnect target remains its owned
+                        # primary view; the receipt tab was tested above.
+                        await checkout_page.goto('https://autobuyer.invalid/embedded')
                     await session.focus_page()
                     await session.context.unroute('**/*',fixture)
                 # Closing the automation connection retains the GUI-owned page.
