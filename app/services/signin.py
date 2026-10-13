@@ -82,12 +82,15 @@ async def sign_in_button(frame):
     return known if await known.count() == 1 else None
 
 
-async def activate_login_control(control):
-    # Qt's CDP input can acknowledge an iframe click without activating its
-    # control. Use this uniquely observed, enabled element's standard action;
-    # the page still handles authentication and any security verification.
+async def activate_login_control(control, *, native_pointer=True):
+    # Chrome uses its normal input path and actionability checks. Qt's CDP
+    # iframe input can acknowledge clicks without activating the control;
+    # retain its separately tested element action only for that backend.
     await expect(control).to_be_enabled(timeout=5000)
-    await control.evaluate('(element) => element.click()')
+    if native_pointer:
+        await control.click(timeout=5000)
+    else:
+        await control.evaluate('(element) => element.click()')
 
 
 class SignInController:
@@ -153,7 +156,7 @@ class SignInController:
             if key not in self.trust_attempted:
                 await guard()
                 self.trust_attempted.add(key)
-                await activate_login_control(button)
+                await activate_login_control(button,native_pointer=config.browser_kind!='embedded')
                 progress('auto_login', {'status': 'trust_selected', 'message': '已按提前选择确认信任此浏览器；后续是否要求验证仍由 Apple 决定'})
             return True
         return False
@@ -231,14 +234,14 @@ class SignInController:
                     if config.trust_browser and await remember.count() == 1:
                         if not await remember.is_checked():
                             await guard()
-                            await activate_login_control(remember)
+                            await activate_login_control(remember,native_pointer=config.browser_kind!='embedded')
                         await expect(remember).to_be_checked(timeout=5000)
                     button = await sign_in_button(frame)
                     if button is None:
                         raise UserAction('官网登录按钮无法唯一确认，请手动继续')
                     await guard()
                     password_submitted = True
-                    await activate_login_control(button)
+                    await activate_login_control(button,native_pointer=config.browser_kind!='embedded')
                 elif not account_submitted and not password_submitted and await account.count():
                     await guard()
                     await account.fill(credential.account, timeout=5000)
@@ -250,7 +253,7 @@ class SignInController:
                     account_entered = frame
                     account_submitted = True
                     await guard()
-                    await activate_login_control(button)
+                    await activate_login_control(button,native_pointer=config.browser_kind!='embedded')
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise UserAction('Apple 登录尚未返回明确结果；已保留会话，不会重复提交密码')

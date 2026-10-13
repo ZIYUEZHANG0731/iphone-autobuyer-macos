@@ -4,6 +4,10 @@
 
 ## 环境与可运行产物
 
+### v0.7.6 / build 49 Windows 正常输入与标签恢复
+
+最终完整回归 **549 passed / 3 macOS skipped / 309.23 秒**，冻结环境、GUI、内置 renderer 和合成单次订单自检全部通过。Chrome 登录恢复正常输入点击，新启动在恢复会话 Cookie 后关闭旧标签，存活进程重接仍保留原有页面；Qt 的已有路径保留。真实完整单次认证在普通点击和单一登录页两种对照中仍返回 **503 / HTML**，尚未成功登录或到最终核对页。源码/分发通过不等同于认证通过，详情见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md) 和 [登录诊断](LOGIN_DIAGNOSIS.md)。
+
 ### v0.7.6 / build 48 Windows 登录步骤与窗口遮挡
 
 最终完整回归 **547 passed / 3 macOS skipped / 292.10 秒**。修正 IDMS 祖先声明隐藏的密码框误识别、购物袋慢导航等待，以及 Windows 专用 Chrome 完全被其他窗口覆盖时暂停渲染造成的正常点击停顿。实际不透明 Qt 覆盖窗口的离线测试确认动画帧继续、单选操作触发一次可信事件，浏览器原生 webdriver 状态保留。官方扩展选择页等待改为 10 分钟且仍可取消。用户授权的单次真实中国区认证提交仍返回 **503 / HTML**；没有新增 Apple 订单或付款，最终核对页未通过。细节见 [登录诊断](LOGIN_DIAGNOSIS.md) 和 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。

@@ -75,8 +75,8 @@ class BrowserSession:
             f'--remote-debugging-port={port}','--remote-debugging-address=127.0.0.1',
             *visibility_args,
             # Chrome session restoration is also needed for cookies without
-            # expiry. Load the profile without restoring old checkout tabs;
-            # our normal new_page below creates the visible fresh window.
+            # expiry. Creating the first visible window can also restore old
+            # tabs; fresh_chrome_page below closes them before a new task.
             '--restore-last-session','--no-startup-window',
             '--no-first-run','--no-default-browser-check',
             stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.DEVNULL)
@@ -130,6 +130,8 @@ class BrowserSession:
                 public=[p for p in pages if apple_url(p.url)]
                 nonblank=[p for p in pages if p.url and not p.url.startswith('about:blank')]
                 self.page=(checkout or accounts or public or nonblank or pages)[-1] if pages else await self.new_page()
+            elif self.process:
+                await self.fresh_chrome_page()
             else:self.page = await self.context.new_page()
             self.page.set_default_timeout(15000)
             self.page.set_default_navigation_timeout(30000)
@@ -138,6 +140,23 @@ class BrowserSession:
             await self.__aexit__(None,None,None)
             if isinstance(error,FlowError):raise
             raise FlowError('内置浏览器连接未完成，请重试或切换独立 Chrome' if self.embedded else "浏览器启动失败；请检查软件会话是否被占用。已安装 Chrome 时使用其独立会话；否则在“诊断…”安装 Chromium") from None
+
+    async def fresh_chrome_page(self):
+        # Restoring session cookies can also restore old tabs when Chrome
+        # creates its first window, despite --no-startup-window. Keep a blank
+        # primary page while closing those restored app-profile tabs before
+        # any fresh authentication starts. Live-process recovery and borrowed
+        # daily/embedded contexts never use this startup cleanup.
+        self.page=await self.context.new_page()
+        deadline=time.monotonic()+2
+        quiet_since=time.monotonic()
+        while True:
+            old=[page for page in self.context.pages if page is not self.page and not page.is_closed()]
+            for page in old:await page.close()
+            if old:quiet_since=time.monotonic()
+            if time.monotonic()>=deadline or time.monotonic()-quiet_since>=.75:
+                return
+            await asyncio.sleep(.05)
 
     async def target_id(self,page):
         cdp=await self.context.new_cdp_session(page)

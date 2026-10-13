@@ -46,7 +46,7 @@ async def browser():
 
 
 def enabled_settings():
-    return Settings(credential_id=str(uuid4()), auto_login=True, trust_browser=True)
+    return Settings(credential_id=str(uuid4()), auto_login=True, trust_browser=True,browser_kind='chrome')
 
 
 async def fixture(browser, *, body=ONE_STEP, outcome='success', top=TOP, auth_host='idmsa.apple.com', auth_status=200):
@@ -157,6 +157,23 @@ async def test_observed_idms_arrow_with_changed_or_delayed_label_submits_once(br
         assert await f.adapter.auto_sign_in(f.page)
         assert len(f.submissions)==1 and len(f.reads)==1
         assert await f.adapter.confirm_login(timeout=.2)
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+async def test_signin_uses_normal_pointer_activation_with_browser_input_events(browser):
+    body=ONE_STEP.replace('onclick="submit()"','onclick="activation={trusted:event.isTrusted,pointer:pointerSeen};submit()"')
+    body+='''<script>let activation=null;let pointerSeen=false;
+        document.querySelector('button').addEventListener('pointerdown',()=>pointerSeen=true);
+        </script>'''
+    f=await fixture(browser,body=body,outcome='<p>等待登录结果</p>')
+    f.config.operation_timeout=2
+    try:
+        frame=f.page.frames[1]
+        with pytest.raises(UserAction,match='尚未返回明确结果'):
+            await f.adapter.auto_sign_in(f.page)
+        assert await frame.evaluate('activation')=={'trusted':True,'pointer':True}
+        assert len(f.submissions)==1 and len(f.reads)==1
     finally:await f.context.close()
 
 

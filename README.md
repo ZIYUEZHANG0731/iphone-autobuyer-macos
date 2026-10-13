@@ -2,7 +2,7 @@
 
 Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实网站试跑与受条件保护的下单工具。Python / PySide6 / Playwright，支持 macOS Apple Silicon 与 Windows 11 x64。
 
-> Windows 分支 `codex/windows-port` 最新源码为 v0.7.6 / build 48：547 项通过，3 项 macOS 专项跳过。修正隐藏密码框导致停在账户继续步骤的问题，以及 Chrome 窗口被遮挡后正常点击停顿的问题；官方扩展页面选择等待延长到 10 分钟。新版包位于 `dist/build48/`。商店账户复核、原生网络诊断和原有 Windows 分发能力保留；build 46 另已验证解压后的独立运行。真实官网已进入取货信息页，但本次单次密码提交仍返回中国区认证 503，尚未到最终核对页；不把客户端修复当作实际认证已通过。已录本机公开界面 Demo。详见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md) 和 [便携版使用](docs/WINDOWS_QUICKSTART.md)。macOS `main` 保留 v0.7.5 / build 43。
+> Windows 分支 `codex/windows-port` 最新源码为 v0.7.6 / build 49：549 项通过，3 项 macOS 专项跳过。Chrome 登录采用正常输入点击，新启动保留会话 Cookie 并关闭自动恢复的旧标签；Qt 路径和存活浏览器的原页面保留。隐藏密码框、窗口遮挡、账户复核和原生网络诊断修复继续保留。新版包位于 `dist/build49/`。真实普通点击链和单一登录页链均已完整执行，但单次密码提交仍返回中国区认证 503；实际请求语言和时钟已核实，尚未成功登录或到最终核对页。分发自检与真实认证分别记录，详见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md) 和 [便携版使用](docs/WINDOWS_QUICKSTART.md)。macOS `main` 保留 v0.7.5 / build 43。
 
 **v0.7.5**：付款选择与自动提交不再限定招商银行 24 期。支付宝、微信支付使用普通付款；花呗分期、微信分付与银行方案按所选期数检查。首选银行不可用时，备用普通付款不会继承银行期数；两种浏览器均在最终核对通过后提交一次。官网是否提供该方式、是否要求额外验证仍由实际页面决定。
 
@@ -58,7 +58,7 @@ v0.6.4 已验证的内置登录修复继续保留。系统中文、地区德国�
 
 ## 启动
 
-Windows 便携版：本轮最新版为 `dist/build48/iPhone AutoBuyer Windows v0.7.6.zip`；正式构建脚本的默认输出仍为 `dist/iPhone AutoBuyer Windows v0.7.6.zip`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
+Windows 便携版：本轮最新版为 `dist/build49/iPhone AutoBuyer Windows v0.7.6.zip`；正式构建脚本的默认输出仍为 `dist/iPhone AutoBuyer Windows v0.7.6.zip`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
 
 Windows 源码开发：
 

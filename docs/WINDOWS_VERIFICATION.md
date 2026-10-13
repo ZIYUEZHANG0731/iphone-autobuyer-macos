@@ -1,4 +1,4 @@
-# Windows 第二阶段验收（v0.7.6 / build 48）
+# Windows 第二阶段验收（v0.7.6 / build 49）
 
 日期：2026-10-13。代码基线 `1472e79`，在 `codex/windows-port` 继续；macOS `main` 未改变。第一阶段结果保留在 [Windows 交接](WINDOWS_HANDOFF.md)，本页记录实际 Windows 证据。
 
@@ -107,6 +107,14 @@ IDMS 第一阶段的密码框祖先 `aria-hidden="true"`、高度为 0，但密�
 干净 DLL 路径构建成功；最终冻结环境、GUI、内置 renderer 和合成订单自检全部退出 0，合成 PAYMENT_PENDING、submit_count=1、synthetic_orders=1。证据 `reports/windows-build48-final.log`、`windows-self-test48-final.log`，临时隔离目录 `AutoBuyer packaged 7c2b921b-b653-4dd5-9a26-257fffc4f8c5`。冻结 PYZ 静态复核包含新的遮挡参数和隐藏密码过滤。最终分发包 **`dist/build48/iPhone AutoBuyer Windows v0.7.6.zip`**，263,977,251 字节，SHA256 **`b0bd0e44df0b50430689b0e9d55dc894863fdb8be1b1ce9e08b92fa1a4f4c797`**；完整解压运行仍按 build 46 的原有版本证据记录。
 
 用户本轮授权的真实认证初始化返回 200 / JSON，完成同一流程剩余的单次密码提交后仍为 **503 / HTML**。正式提交记录仍为 0，实际核对页未通过。扩展选择页等待延长为 10 分钟并提示 Welcome 页，仍可随时取消；新的日常 Chrome 受保护会话复核尚待完成。详情见 [登录诊断](LOGIN_DIAGNOSIS.md)，本机脱敏报告 `reports/windows-login-investigation-build48.json`。
+
+## build 49：正常 Chrome 输入与新启动标签恢复
+
+最终完整回归 **549 passed / 3 skipped / 309.23 秒**，证据 `reports/windows-source49-final.xml`。仅修改正常 Chrome 的登录输入路径和专用 Chrome 新启动时的旧标签处理；Qt 按钮路径仍独立保留。登录与 Qt 专项 **41 passed / 50.93 秒**，原生 Chrome 冷重开、Cookie 保留和多页进程重接专项 **4 passed / 10.07 秒**。首轮直接将所有后端改为原生点击，使 Qt 登录夹具失败，已按其实际后端保留原路径；最终完整回归再次执行全部用例。
+
+干净搜索路径 PyInstaller 构建成功；最终冻结环境、GUI、内置 renderer 和合成单次订单自检全部通过。证据 `reports/windows-build49.log`、`windows-self-test49.log`、`windows-package49.log`，合成隔离目录 `AutoBuyer packaged 93347d19-2a2a-4c45-8ec0-c63f541e9766`。最终包 **`dist/build49/iPhone AutoBuyer Windows v0.7.6.zip`**，263,978,343 字节；SHA256 **`5a357d0a79be7196cfede9d8be6fff131d1aaee769ea2c42a8d65061d419dc61`**。没有重复新电脑或全新用户验收。
+
+真正的登录结果仍未通过：16:38 的正常 Chrome 点击链和 17:00 的单一新登录页链，均为初始化 200 / JSON、单次密码提交 503 / HTML。公开入口的请求语言、认证语言参数和时钟均已核实。没有继续循环重发密码，没有创建真实订单。日常 Chrome 控制接口不可用，真实成功认证对照尚未取得，详情见 [登录诊断](LOGIN_DIAGNOSIS.md)。
 
 ## 仍需完成的验收
 
