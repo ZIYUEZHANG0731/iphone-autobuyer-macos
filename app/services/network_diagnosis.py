@@ -5,6 +5,7 @@ response bodies, URLs with query strings, or authentication headers are saved.
 The observer remains attached while a person uses the app's login page.
 """
 from __future__ import annotations
+from app.platforms.files import protect_path
 
 import asyncio
 from collections import deque
@@ -176,7 +177,7 @@ class NetworkDiagnosis:
         try:
             if self.path.is_file() and not self.path.is_symlink():
                 self.path.replace(self.previous_path)
-                self.previous_path.chmod(0o600)
+                protect_path(self.previous_path)
         except OSError:
             pass
         self.context = context

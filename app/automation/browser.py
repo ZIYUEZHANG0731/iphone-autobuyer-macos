@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from app.services.chrome_session import find_owned_chrome
 from app.services.login import account_page_url
 from app.platforms import installed_chrome
+from app.platforms.files import private_directory
 
 
 class BrowserSession:
@@ -49,7 +50,7 @@ class BrowserSession:
         # Leave website/browser defaults intact; no injected scripts, modified
         # fingerprints, proxy overrides or replayed Apple requests.
         profile=self.root/'chrome-profile'
-        profile.mkdir(parents=True,exist_ok=True,mode=0o700);profile.chmod(0o700)
+        private_directory(profile)
         self.chrome_executable,self.chrome_profile=executable,profile
         existing=await asyncio.to_thread(find_owned_chrome,executable,profile)
         if len(existing)>1:raise FlowError('发现多个软件 Chrome 会话，请保留一个再恢复')
@@ -106,8 +107,7 @@ class BrowserSession:
                 await self._start_chrome(chrome)
             else:
                 profile = self.root / "browser-profile"
-                profile.mkdir(parents=True,exist_ok=True,mode=0o700)
-                profile.chmod(0o700)
+                private_directory(profile)
                 self.context = await self.playwright.chromium.launch_persistent_context(
                     str(profile),headless=self.headless,locale="zh-CN",timezone_id="Asia/Shanghai",service_workers="block",
                     handle_sigint=False,handle_sigterm=False,handle_sighup=False,
@@ -210,7 +210,7 @@ class BrowserSession:
             try:
                 await asyncio.wait_for(self.process.wait(),5)
             except asyncio.TimeoutError:
-                self.process.terminate()
+                if self.process.returncode is None:self.process.terminate()
                 try:await asyncio.wait_for(self.process.wait(),5)
                 except asyncio.TimeoutError:self.process.kill();await self.process.wait()
         if self.context and self.process is None and not self.chrome_owner:

@@ -29,7 +29,7 @@ from app.services.traffic import SiteCooldown
 from app.services.signin import SignInController
 from app.services.login import apple_auth_url, shop_signin_url, session_page_url
 from app.services.network_diagnosis import NetworkDiagnosis
-from app.platforms import system_label, vault_label
+from app.platforms import system_label
 from app.utils.files import write_private_json
 
 
@@ -126,7 +126,7 @@ class Worker(QThread):
             chrome = installed_chrome()
             browser = 'Google Chrome（软件独立会话）' if chrome else 'Chromium 已安装' if installed else '未安装，请点击安装浏览器'
             installed = bool(chrome or installed)
-        return {'state':'COMPLETED', 'message':f'{system_label()}\n浏览器：{browser}\n安全存储：{vault_label()}', 'browser_installed':installed}
+        return {'state':'COMPLETED', 'message':f'{system_label()}\n浏览器：{browser}\n资料保存：本机加密文件（当前系统账户权限）', 'browser_installed':installed}
 
     async def workflow(self):
         repo = Repository(self.root / 'autobuyer.sqlite3', Redactor())

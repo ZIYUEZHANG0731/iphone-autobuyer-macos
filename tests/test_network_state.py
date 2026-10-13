@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 
 import asyncio
 import json
@@ -83,11 +84,12 @@ async def test_network_change_is_correlated_with_auth_events_and_saved_locally(t
     second={'sequence':2,'family':'auth_complete','status':409,'auth_state':'hsa2'}
     diagnosis.events.append(second)
     await diagnosis.sample_network('auth_response',second)
-    report=json.loads(diagnosis.path.read_text())
+    report=json.loads(diagnosis.path.read_text(encoding='utf-8'))
     assert [event['network_revision'] for event in report['events']]==[1,2]
     assert len(report['network_samples'])==2 and report['network_samples'][1]['state']==current
     assert seen[-1][1]['changed'] is True
-    assert diagnosis.path.stat().st_mode & 0o777 == 0o600
+    if os.name != 'nt':
+        assert diagnosis.path.stat().st_mode & 0o777 == 0o600
 
 
 async def test_transport_metadata_is_bounded_and_never_stores_peer_address_or_certificate_names(tmp_path):
@@ -112,7 +114,7 @@ async def test_network_reader_failure_does_not_abort_authentication_diagnosis(tm
     diagnosis.events.append(event)
     await diagnosis.sample_network('auth_response',event)
     assert diagnosis.network_samples[-1]['state']=={'available':False}
-    assert 'PRIVATE' not in diagnosis.path.read_text()
+    assert 'PRIVATE' not in diagnosis.path.read_text(encoding='utf-8')
 
 
 async def test_closed_observer_does_not_launch_more_os_queries(tmp_path):
@@ -135,8 +137,9 @@ async def test_new_session_preserves_previous_diagnostic_without_page_fields(tmp
     page=Page();context.pages=[page]
     diagnosis=NetworkDiagnosis(tmp_path,'chrome',network_reader=reader)
     diagnosis.path.write_text('{"events":[{"family":"auth_complete","auth_state":"hsa2"}]}')
-    before=diagnosis.path.read_text()
+    before=diagnosis.path.read_text(encoding='utf-8')
     await diagnosis.start(context,page)
     await diagnosis.close()
-    assert diagnosis.previous_path.read_text()==before
-    assert diagnosis.previous_path.stat().st_mode & 0o777 == 0o600
+    assert diagnosis.previous_path.read_text(encoding='utf-8')==before
+    if os.name != 'nt':
+        assert diagnosis.previous_path.stat().st_mode & 0o777 == 0o600

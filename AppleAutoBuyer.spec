@@ -13,12 +13,16 @@ datas=collect_data_files('playwright')+[
     (str(root/'app/services/official_stores.json'),'app/services'),
     (str(root/'app/services/daily_chrome_bridge.cjs'),'app/services'),
 ]
+if sys.platform == 'win32':
+    datas += collect_data_files('tzdata')
 a=Analysis([str(root/'app/main.py')],pathex=[str(root)],binaries=[(str(native),'app/platforms/native')] if native else [],datas=datas,
-    hiddenimports=['PySide6.QtWebEngineCore','PySide6.QtWebEngineWidgets'] + {
+    hiddenimports=['PySide6.QtWebEngineCore','PySide6.QtWebEngineWidgets','cryptography.fernet'] + {
         'darwin':['keyring.backends.macOS','keyring.backends.macOS.api'],
-        'win32':['keyring.backends.Windows'],
+        'win32':['keyring.backends.Windows','tzdata'],
     }.get(sys.platform,[]),
-    excludes=['PySide6.QtQml','PySide6.QtQuick'],
+    # QtWebEngine's Windows DLL graph includes QtQuick/QML. Let the official
+    # hooks collect its runtime rather than excluding those dependencies.
+    excludes=[],
     noarchive=False)
 pyz=PYZ(a.pure)
 exe=EXE(pyz,a.scripts,[],exclude_binaries=True,name='iPhone AutoBuyer',debug=False,

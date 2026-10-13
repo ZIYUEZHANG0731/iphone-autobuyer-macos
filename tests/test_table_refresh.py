@@ -59,6 +59,6 @@ def test_refresh_discards_stale_accessible_cells_and_keeps_new_rows_readable(tmp
          'PYTHONFAULTHANDLER':'1'}
     result=subprocess.run([sys.executable,'-c',script,str(tmp_path)],
                           cwd=Path(__file__).resolve().parents[1],env=env,
-                          text=True,capture_output=True,timeout=20)
+                          text=True,encoding='utf-8',capture_output=True,timeout=20)
     assert result.returncode==0,result.stdout+'\n'+result.stderr
     assert 'ACCESSIBLE_REFRESH_OK' in result.stdout

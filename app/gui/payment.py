@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.platforms.files import protect_path
 
 from datetime import datetime, timezone
 from PySide6.QtCore import Qt, QTimer
@@ -93,7 +94,7 @@ class PaymentDialog(QDialog):
                 QMessageBox.information(self, "未保存", "请选择可写入的图片保存位置。")
             else:
                 from pathlib import Path
-                Path(path).chmod(0o600)
+                protect_path(Path(path))
 
     def copy_image(self):
         if self.available():

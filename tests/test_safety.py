@@ -45,7 +45,7 @@ def test_logs_strip_registered_identity_and_url_tokens(tmp_path):
     r=Redactor();r.register(secret);repo=Repository(tmp_path/'db.sqlite',r)
     message=' '.join(asdict(secret).values())+' https://www.apple.com.cn/shop?token=TOP_SECRET'
     repo.update_run('run','website_dry_run','PAUSED',message)
-    output=tmp_path/'logs.json';repo.export_logs(output);text=output.read_text()
+    output=tmp_path/'logs.json';repo.export_logs(output);text=output.read_text(encoding='utf-8')
     for value in [secret.name,secret.document_number,secret.phone,secret.email,'TOP_SECRET']:assert value not in text
     assert '[已脱敏]' in text
 

@@ -1,4 +1,4 @@
-QWidget { color: #242426; font-family: ".AppleSystemUIFont", "PingFang SC", sans-serif; font-size: 13px; }
+QWidget { color: #242426; font-family: ".AppleSystemUIFont", "PingFang SC", "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; }
 QMainWindow, QDialog, QWidget#contentPage { background: #ffffff; }
 QLabel { background: transparent; }
 QLabel#brand { font-size: 17px; font-weight: 600; }

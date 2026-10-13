@@ -18,3 +18,12 @@ reports/*.txt
 reports/*.log
 payment-qr/
 private-inputs/
+chrome-profile/
+embedded-profile/
+browser-profile/
+ms-playwright/
+local.key
+records.enc
+checkout-diagnostic.json
+login-diagnostic-*.json
+website-cooldown.json

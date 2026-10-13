@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 
 import asyncio
 import json
@@ -83,9 +84,10 @@ async def test_passive_observer_keeps_541_callback_and_service_error_after_actio
         finally:
             await diagnosis.close()
             await browser.close()
-        contents = diagnosis.path.read_text()
+        contents = diagnosis.path.read_text(encoding='utf-8')
         report = json.loads(contents)
-        assert diagnosis.path.stat().st_mode & 0o777 == 0o600
+        if os.name != 'nt':
+            assert diagnosis.path.stat().st_mode & 0o777 == 0o600
         assert 'PRIVATE' not in contents and 'secret_cookie' not in contents
         assert sorted(requests) == ['GET','GET','POST']
         assert any(e['family']=='shop_idms' and e.get('status')==541 and e.get('error_class')=='apple_not_found_html' for e in report['events'])
@@ -125,13 +127,13 @@ async def test_diagnostics_records_cross_origin_frame_request_and_error_without_
             await diagnosis.sample_pages()
         finally:
             await diagnosis.close()
-        report=json.loads(diagnosis.path.read_text())
+        report=json.loads(diagnosis.path.read_text(encoding='utf-8'))
         assert report['health']['capture_errors']==0
         assert any(e['family']=='auth_init' and e.get('phase')=='request_started' for e in report['events'])
         assert any(e.get('service_error_codes')==['-12345'] for e in report['events'])
         frame=next(s for s in report['page_samples'] if not s['main_frame'])
         assert frame['secure_context'] and frame['webcrypto'] and frame['identity_unverified_visible']
-        assert 'PRIVATE' not in diagnosis.path.read_text() and 'fixture@example' not in diagnosis.path.read_text()
+        assert 'PRIVATE' not in diagnosis.path.read_text(encoding='utf-8') and 'fixture@example' not in diagnosis.path.read_text(encoding='utf-8')
         assert credential_origin('https://idmsa.apple.com.cn/appleauth/auth/authorize')
 
 

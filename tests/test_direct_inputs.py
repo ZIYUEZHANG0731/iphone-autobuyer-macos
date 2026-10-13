@@ -76,7 +76,7 @@ def test_refilling_an_old_profile_preserves_legacy_records_and_restart_settings(
         exported=tmp_path/'config.json'
         monkeypatch.setattr(QFileDialog,'getSaveFileName',lambda *_:(str(exported),'JSON'))
         window.export_config()
-        assert reference not in exported.read_text() and 'format@example.com' not in exported.read_text()
+        assert reference not in exported.read_text(encoding='utf-8') and 'format@example.com' not in exported.read_text(encoding='utf-8')
         window.profile_table.selectRow(0);window.delete_profile()
         assert window.config.profile_id==legacy and IdentityVault.cached(reference) is None
         assert window.profiles==[{'id':legacy,'alias':'旧资料'}]

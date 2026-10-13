@@ -8,7 +8,8 @@ import re
 from uuid import uuid4
 
 from app.models.flow import FlowError
-from app.utils.files import write_private_json
+from app.utils.files import write_private_json, write_private_bytes
+from app.platforms.files import private_directory
 
 
 @dataclass
@@ -35,8 +36,7 @@ class PaymentStore:
 
     def __init__(self, root: Path):
         self.directory = root / "payment-qr"
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.directory.chmod(0o700)
+        private_directory(self.directory)
 
     def save(self, image: bytes, *, order_id: str, payment="", product="", total_cny="",
              installment_months=0, payment_window_minutes=None, submitted_at: datetime | None = None,
@@ -61,8 +61,7 @@ class PaymentStore:
         handoff = PaymentHandoff(order_id, image_file, datetime.now(timezone.utc).isoformat(),
             payment, product, total_cny, installment_months, payment_window_minutes, deadline, payment_app)
         path = self.directory / image_file
-        path.write_bytes(image)
-        path.chmod(0o600)
+        write_private_bytes(path, image)
         self._write_manifest(self.directory / (Path(image_file).stem + ".json"), handoff)
         self._write_manifest(self.directory / "latest.json", handoff)
         return handoff

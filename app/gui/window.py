@@ -13,7 +13,7 @@ from PySide6.QtGui import QColor,QIcon,QPainter,QPixmap
 from PySide6.QtWidgets import (QMainWindow,QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QLayout,
  QFormLayout,QStackedWidget,QScrollArea,QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QCheckBox,QDateTimeEdit,
  QTableWidgetItem,QHeaderView,QListWidget,QListWidgetItem,QAbstractItemView,QPlainTextEdit,QTabWidget,
- QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QSizePolicy,QApplication)
+ QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QSizePolicy,QApplication,QMenu)
 from app import __version__
 from app.models.config import Settings,Product,Store,Mode,State,STATE_LABELS,ConfigError
 from app.models.flow import FlowError
@@ -43,6 +43,7 @@ from app.services.network_diagnosis import FAMILY_LABELS
 from app.services.network_state import network_summary
 from app.utils.qt import single_shot
 from app.platforms.accessibility import prepare_accessibility
+from app.platforms.runtime import fit_window
 
 
 class MainWindow(QMainWindow, BrowserControls, ProfileControls):
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         try:self.config=self.repo.load_config()
         except ConfigError:self.config=Settings()
         self.setWindowTitle('Apple AutoBuyer');self.resize(1280,825);self.setMinimumSize(1060,720);self.setLocale(QLocale('zh_CN'))
+        fit_window(self)
         self.setStyleSheet(resource_path('gui/theme.qss').read_text(encoding='utf-8'))
         self.setWindowIcon(self.icon())
         central=QWidget();self.setCentralWidget(central);outer=QHBoxLayout(central);outer.setContentsMargins(0,0,0,0);outer.setSpacing(0)
@@ -81,7 +83,20 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.populate();self.refresh_profiles();self.refresh_logs()
         if self.input_restore_error:self.message_label.setText(self.input_restore_error)
         self.timer=QTimer(self);self.timer.timeout.connect(self.tick);self.timer.start(1000);self.tick()
-        self.tray=QSystemTrayIcon(self.icon(),self);self.tray.setToolTip('Apple AutoBuyer');self.tray.activated.connect(lambda _:self.showNormal());self.tray.show()
+        self.tray=QSystemTrayIcon(self.icon(),self);self.tray.setToolTip('Apple AutoBuyer');self.tray.activated.connect(self.tray_activated);self.tray.show()
+        self.tray_menu=QMenu(self)
+        self.tray_menu.addAction('显示窗口',self.restore_window)
+        self.tray_menu.addAction('关闭会话',self.close_session)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction('退出软件',QApplication.quit)
+        self.tray.setContextMenu(self.tray_menu)
+
+    def restore_window(self):
+        self.showNormal();self.raise_();self.activateWindow()
+
+    def tray_activated(self,reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.restore_window()
 
     def icon(self):
         p=QPixmap(64,64);p.fill(Qt.GlobalColor.transparent);painter=QPainter(p);painter.setRenderHint(QPainter.RenderHint.Antialiasing);painter.setBrush(QColor('#007aff'));painter.setPen(Qt.PenStyle.NoPen);painter.drawRoundedRect(2,2,60,60,13,13);painter.setPen(QColor('#ffffff'));font=painter.font();font.setPointSize(27);font.setBold(True);painter.setFont(font);painter.drawText(p.rect(),Qt.AlignmentFlag.AlignCenter,'A');painter.end();return QIcon(p)
@@ -185,7 +200,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         l.addLayout(row);l.addWidget(divider())
 
         work=QHBoxLayout();work.setSpacing(24)
-        left=QWidget();c=QVBoxLayout(left);c.setContentsMargins(0,4,0,0);c.setSpacing(8)
+        left=QWidget();left.setMinimumWidth(350);c=QVBoxLayout(left);c.setContentsMargins(0,4,0,0);c.setSpacing(8)
         c.addLayout(section_header('购买计划','编辑配置',lambda:self.stack.setCurrentIndex(0)));c.addWidget(divider())
         product_row=QHBoxLayout();product_row.setContentsMargins(16,8,12,8);product_row.setSpacing(16)
         phone=QLabel();phone.setPixmap(outline_icon('phone',size=38).pixmap(QSize(38,38)));product_row.addWidget(phone)
@@ -195,8 +210,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.plan_budget=QLabel();self.plan_stores=QLabel();self.plan_payment=QLabel()
         for name,value in [('官网价格',self.plan_budget),('自提优先级',self.plan_stores),('付款方案',self.plan_payment)]:
             row=QHBoxLayout();row.setContentsMargins(16,5,8,5);row.setSpacing(16)
-            label=QLabel(name);label.setMinimumWidth(180);row.addWidget(label,0,Qt.AlignmentFlag.AlignTop)
-            value.setTextFormat(Qt.TextFormat.PlainText);value.setWordWrap(True);row.addWidget(value,1);c.addLayout(row);c.addWidget(divider())
+            label=QLabel(name);label.setMinimumWidth(84);row.addWidget(label,0,Qt.AlignmentFlag.AlignTop)
+            value.setTextFormat(Qt.TextFormat.PlainText);value.setWordWrap(True);value.setMinimumWidth(170);row.addWidget(value,1);c.addLayout(row);c.addWidget(divider())
         self.target_label=QLabel(self);self.target_label.hide()
         c.addSpacing(14);c.addLayout(section_header('开售与检查'));c.addWidget(divider())
         self.schedule_enabled=QCheckBox('按开售时间运行');c.addWidget(self.schedule_enabled)
@@ -727,8 +742,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         if time.monotonic()>=self.preparation_refresh_at:self.refresh_preparation()
     def closeEvent(self,event):
         if not self.closing and self.worker and self.worker.isRunning() and (self.worker.session_open or getattr(self.worker,'action','') in ('login','login_check','login_diagnosis','catalog','stores','options','website','live','receipt')):
-            self.hide();event.ignore()
-            self.tray.showMessage('AutoBuyer 继续运行','登录会话和任务保留。点击菜单栏图标恢复窗口；退出软件才会结束运行。',QSystemTrayIcon.MessageIcon.Information,5000)
+            event.ignore()
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                self.hide()
+                self.tray.showMessage('AutoBuyer 继续运行','登录会话和任务保留。点击托盘图标恢复窗口；在托盘菜单退出软件。',QSystemTrayIcon.MessageIcon.Information,5000)
+            else:self.message_label.setText('会话继续运行；系统托盘不可用，请先关闭会话再关闭窗口。')
         elif self.worker and self.worker.isRunning():self.closing=True;self.close_session();event.ignore()
         else:self.tray.hide();event.accept()
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,9 +24,11 @@ def test_payment_deadline_is_not_reset_by_late_inspection(tmp_path):
     handoff = store.save(PNG, order_id='W1234567890', payment_window_minutes=30, submitted_at=submitted)
     assert handoff.expired()
     assert store.latest().payment_deadline == (submitted+timedelta(minutes=30)).isoformat()
-    assert store.image_path(handoff).stat().st_mode & 0o777 == 0o600
-    assert store.directory.stat().st_mode & 0o777 == 0o700
-    assert 'source_url' not in (store.directory/'latest.json').read_text()
+    if os.name != 'nt':
+        assert store.image_path(handoff).stat().st_mode & 0o777 == 0o600
+    if os.name != 'nt':
+        assert store.directory.stat().st_mode & 0o777 == 0o700
+    assert 'source_url' not in (store.directory/'latest.json').read_text(encoding='utf-8')
 
 def test_relative_deadline_without_submission_time_remains_unknown(tmp_path):
     handoff = PaymentStore(tmp_path).save(PNG, order_id='W1234567890', payment_window_minutes=30)
@@ -78,7 +81,7 @@ async def test_extracts_only_rendered_qr_from_offline_official_dom_fixture(brows
         assert handoff.order_id=='W1234567890' and handoff.payment_app==app
         assert handoff.payment==method and handoff.installment_months==months and handoff.payment_window_minutes==30
         assert handoff.payment_deadline is None
-        assert 'PRIVATE-CONTACT' not in (store.directory/'latest.json').read_text()
+        assert 'PRIVATE-CONTACT' not in (store.directory/'latest.json').read_text(encoding='utf-8')
     finally:await context.close()
 
 @pytest.mark.e2e

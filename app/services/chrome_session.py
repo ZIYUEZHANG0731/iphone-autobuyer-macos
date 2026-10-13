@@ -1,9 +1,19 @@
 """Recover only the current user's exact app-owned Chrome executable/profile."""
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import re
 import psutil
+from app.platforms import path_key
+
+
+def switch_values(args, name):
+    values = []
+    for index, arg in enumerate(args):
+        if arg.startswith(name + '='):
+            values.append(arg[len(name) + 1:].strip('"'))
+        elif arg == name:
+            values.append(args[index + 1].strip('"') if index + 1 < len(args) else '')
+    return values
 
 
 @dataclass(frozen=True)
@@ -14,19 +24,19 @@ class OwnedChrome:
 
 def parse_owned_chrome(processes, executable: Path, profile: Path, active_port='', *, username) -> list[OwnedChrome]:
     results = []
-    expected = os.path.normcase(str(executable.resolve()))
-    required = f'--user-data-dir={profile}'
+    expected = path_key(executable)
     for process in processes:
         args = process.get('cmdline') or []
-        if process.get('username') != username or not process.get('exe') or required not in args:
+        if process.get('username') != username or not process.get('exe'):
             continue
-        if os.path.normcase(str(Path(process['exe']).resolve())) != expected:
+        if path_key(process['exe']) != expected:
             continue
         if any(arg.startswith('--type=') for arg in args):
             continue
-        if sum(arg.startswith('--user-data-dir=') for arg in args) != 1:
+        profiles = switch_values(args, '--user-data-dir')
+        if len(profiles) != 1 or not profiles[0] or path_key(profiles[0]) != path_key(profile):
             continue
-        ports = [arg.removeprefix('--remote-debugging-port=') for arg in args if arg.startswith('--remote-debugging-port=')]
+        ports = switch_values(args, '--remote-debugging-port')
         if len(ports) != 1 or not ports[0].isdigit():
             continue
         number = int(ports[0])

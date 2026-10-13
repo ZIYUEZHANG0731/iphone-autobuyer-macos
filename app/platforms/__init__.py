@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ntpath
 import platform
 from pathlib import Path
 import sys
@@ -10,7 +11,15 @@ from app.models.flow import FlowError
 
 
 def local_app_data() -> Path:
-    return Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local'))
+    return Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local')
+
+
+def path_key(value) -> str:
+    """Compare equivalent native paths without losing Chinese characters."""
+    if sys.platform == 'win32':
+        native = str(Path(value).resolve()) if os.name == 'nt' else str(value)
+        return ntpath.normcase(ntpath.normpath(native))
+    return str(Path(value).resolve())
 
 
 def default_data_dir() -> Path:
@@ -44,7 +53,12 @@ def chrome_locations() -> tuple[list[Path], Path]:
 
 
 def installed_chrome() -> Path | None:
-    return next((path for path in chrome_locations()[0] if path.is_file()), None)
+    paths = chrome_locations()[0]
+    if sys.platform == 'win32':
+        from app.platforms.windows import chrome_app_paths
+        paths += [Path(value) for value in chrome_app_paths()
+                  if ntpath.isabs(value) and ntpath.basename(value).casefold() == 'chrome.exe']
+    return next((path for path in paths if path.is_file()), None)
 
 
 def vault_label() -> str:

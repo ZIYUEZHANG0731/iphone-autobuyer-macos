@@ -88,7 +88,7 @@ def test_accessible_window_and_worker_exit_cleanly(tmp_path, exit_method):
     env={**os.environ,'QT_QPA_PLATFORM':'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path),'PYTHONFAULTHANDLER':'1'}
     result=subprocess.run([sys.executable,'-c',script,str(tmp_path),exit_method],
                           cwd=Path(__file__).resolve().parents[1],env=env,
-                          text=True,capture_output=True,timeout=25)
+                          text=True,encoding='utf-8',capture_output=True,timeout=25)
     assert result.returncode==0, result.stdout+'\n'+result.stderr
     assert 'ACCESSIBLE_SHUTDOWN_OK' in result.stdout
     assert 'QThread: Destroyed' not in result.stderr
@@ -98,7 +98,7 @@ def test_actual_gui_entry_point_shuts_down_without_atexit_widgets(tmp_path):
     env={**os.environ,'QT_QPA_PLATFORM':'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path)}
     result=subprocess.run([sys.executable,'-m','app.main','--smoke-test'],
                           cwd=Path(__file__).resolve().parents[1],env=env,
-                          text=True,capture_output=True,timeout=25)
+                          text=True,encoding='utf-8',capture_output=True,timeout=25)
     assert result.returncode==0, result.stdout+'\n'+result.stderr
     assert 'GUI_SMOKE_OK' in result.stdout
 
@@ -107,7 +107,7 @@ def test_embedded_gui_entry_point_checks_the_renderer_and_exits_cleanly(tmp_path
     env={**os.environ,'QT_QPA_PLATFORM':'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path)}
     result=subprocess.run([sys.executable,'-m','app.main','--embedded-smoke-test'],
                           cwd=Path(__file__).resolve().parents[1],env=env,
-                          text=True,capture_output=True,timeout=25)
+                          text=True,encoding='utf-8',capture_output=True,timeout=25)
     assert result.returncode==0,result.stdout+'\n'+result.stderr
     assert 'EMBEDDED_SMOKE_OK' in result.stdout
     assert 'QThread: Destroyed' not in result.stderr

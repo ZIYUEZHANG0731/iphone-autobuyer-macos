@@ -196,8 +196,9 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
     for phase in ('save','reopen'):
         result=subprocess.run([sys.executable,'-c',script,str(tmp_path),phase,method,str(months)],
                               cwd=Path(__file__).resolve().parents[1],env=env,
-                              text=True,capture_output=True,timeout=45)
+                              text=True,encoding='utf-8',capture_output=True,timeout=45)
         assert result.returncode==0,result.stdout+'\n'+result.stderr
         assert 'EMBEDDED_PROFILE_OK:'+phase in result.stdout
         assert 'QThread: Destroyed' not in result.stderr
-    assert (tmp_path/'embedded-profile'/'storage').stat().st_mode & 0o777 == 0o700
+    if os.name != 'nt':
+        assert (tmp_path/'embedded-profile'/'storage').stat().st_mode & 0o777 == 0o700

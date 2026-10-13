@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.platforms.files import protect_path
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +30,7 @@ class Repository:
               CREATE TABLE IF NOT EXISTS stock_snapshots (product_key TEXT NOT NULL, store_key TEXT NOT NULL, available INTEGER NOT NULL, quote TEXT NOT NULL, observed TEXT NOT NULL, PRIMARY KEY(product_key,store_key));
               CREATE TABLE IF NOT EXISTS stock_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, product TEXT NOT NULL, options TEXT NOT NULL, store_name TEXT NOT NULL, available INTEGER NOT NULL, previous_available INTEGER, quote TEXT NOT NULL);
             ''')
-        self.path.chmod(0o600)
+        protect_path(self.path)
 
     @contextmanager
     def connect(self):
@@ -129,4 +130,4 @@ class Repository:
 
     def export_logs(self, path: Path):
         path.write_text(json.dumps(self.redactor.object(self.events(limit=10000)),ensure_ascii=False,indent=2),encoding="utf-8")
-        path.chmod(0o600)
+        protect_path(path)

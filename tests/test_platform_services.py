@@ -10,8 +10,9 @@ from keyring.errors import PasswordDeleteError
 import pytest
 
 import app.platforms as platforms
+import app.platforms.windows as windows
 import app.security.vault as vaults
-import app.utils.power as power
+import app.platforms.power as power
 from app.models.config import Identity
 from app.models.credential import AppleCredential
 from app.models.flow import FlowError
@@ -33,6 +34,7 @@ def test_windows_paths_use_local_app_data_and_actual_chrome_installs(tmp_path, m
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path/'local'))
     monkeypatch.setenv('PROGRAMFILES', str(tmp_path/'programs'))
     monkeypatch.setenv('PROGRAMFILES(X86)', str(tmp_path/'programs-x86'))
+    monkeypatch.setattr(windows, 'chrome_app_paths', lambda: [])
     assert platforms.default_data_dir() == tmp_path/'local/Apple AutoBuyer'
     assert platforms.browser_cache_dir() == tmp_path/'local/ms-playwright'
     locations, metadata = platforms.chrome_locations()
@@ -98,7 +100,7 @@ try:
 except FlowError:print('BUSY')
 '''
     def probe():
-        result=subprocess.run([sys.executable,'-c',script,str(path)],text=True,capture_output=True,
+        result=subprocess.run([sys.executable,'-c',script,str(path)],text=True,encoding='utf-8',capture_output=True,
                               cwd=Path(__file__).resolve().parents[1],timeout=10)
         assert result.returncode==0,result.stderr
         return result.stdout.strip()
@@ -116,7 +118,7 @@ def test_private_json_failure_retains_previous_record_and_cleans_temporary_file(
     with pytest.raises(TypeError):write_private_json(path,{'invalid':object()})
     assert path.read_bytes()==previous and not list(tmp_path.glob('*.tmp'))
     write_private_json(path,{'更新':2})
-    assert json.loads(path.read_text())=={'更新':2}
+    assert json.loads(path.read_text(encoding='utf-8'))=={'更新':2}
     if os.name!='nt':assert path.stat().st_mode & 0o777 == 0o600
 
 

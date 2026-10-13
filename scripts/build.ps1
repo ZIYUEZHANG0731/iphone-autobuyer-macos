@@ -1,12 +1,14 @@
-$ErrorActionPreference = 'Stop'
-Set-Location (Split-Path -Parent $PSScriptRoot)
-if (-not (Test-Path '.venv\Scripts\python.exe')) {
-    & python -m venv .venv
-    if ($LASTEXITCODE -ne 0) { throw 'Python environment creation failed' }
-}
-$taskPython = Join-Path (Get-Location) '.venv\Scripts\python.exe'
-& $taskPython -m pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-& $taskPython -m PyInstaller --noconfirm --clean AppleAutoBuyer.spec
-if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
-Write-Host 'Built dist\iPhone AutoBuyer\iPhone AutoBuyer.exe; keep its entire folder together.'
+try {
+    . (Join-Path $PSScriptRoot 'windows-common.ps1')
+    Initialize-Task
+    Require-TaskPython
+    & (Join-Path $PSScriptRoot 'check.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Environment check failed.' }
+    & (Join-Path $PSScriptRoot 'test.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Source regression failed; build stopped.' }
+    Invoke-TaskPython -m PyInstaller --noconfirm --clean (Join-Path $TaskRoot 'AppleAutoBuyer.spec')
+    & (Join-Path $PSScriptRoot 'self-test.ps1') -Distribution (Join-Path $TaskRoot 'dist\iPhone AutoBuyer') -WithChromium
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged offline self-test failed.' }
+    Write-Host 'Built dist\iPhone AutoBuyer. Distribute the entire directory, including _internal.'
+    exit 0
+} catch { Write-Error $_ -ErrorAction Continue; exit 1 }

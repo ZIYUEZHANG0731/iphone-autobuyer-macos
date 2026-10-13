@@ -1,6 +1,7 @@
 """The same nonblocking purchase-session lock on macOS and Windows."""
 from pathlib import Path
 import portalocker
+from app.platforms.files import is_link, protect_path
 
 from app.models.flow import FlowError
 
@@ -13,8 +14,9 @@ class ProcessLock:
     def __enter__(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            if is_link(self.path):raise OSError('Invalid lock path')
             self.lock.acquire()
-            self.path.chmod(0o600)
+            protect_path(self.path)
         except portalocker.exceptions.AlreadyLocked:
             raise FlowError('另一个购买任务正在运行，请先停止它') from None
         except (OSError, portalocker.exceptions.LockException):

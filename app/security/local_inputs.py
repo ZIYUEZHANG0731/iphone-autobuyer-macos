@@ -2,15 +2,15 @@
 from copy import deepcopy
 from dataclasses import asdict
 import json
-import os
 from pathlib import Path
-import tempfile
 from uuid import UUID
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.models.flow import FlowError
 from app.security.vault import CredentialVault, IdentityVault
+from app.platforms.files import is_link, private_directory, protect_path
+from app.utils.files import write_private_bytes
 
 
 class LocalInputs:
@@ -25,18 +25,18 @@ class LocalInputs:
 
     @staticmethod
     def _read(path, limit):
-        if path.is_symlink() or path.stat().st_size > limit:
+        if is_link(path) or path.stat().st_size > limit:
             raise ValueError('Invalid private file')
-        path.chmod(0o600)
+        protect_path(path)
         return path.read_bytes()
 
     def restore(self, redactor):
         if not self.path.exists():
             return
         try:
-            if self.root.is_symlink():
+            if is_link(self.root):
                 raise ValueError('Invalid private directory')
-            self.root.chmod(0o700)
+            protect_path(self.root)
             key = self._read(self.key_path, 128)
             raw = json.loads(Fernet(key).decrypt(self._read(self.path, 1024 * 1024)))
             if not isinstance(raw, dict) or raw.get('version') != 1 or not isinstance(raw.get('records'), dict):
@@ -81,26 +81,13 @@ class LocalInputs:
 
     @staticmethod
     def _atomic_write(path, data):
-        descriptor, name = tempfile.mkstemp(prefix='.write-', dir=path.parent)
-        try:
-            with os.fdopen(descriptor, 'wb') as stream:
-                os.chmod(name, 0o600)
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(name, path)
-        finally:
-            if os.path.exists(name):
-                os.unlink(name)
+        write_private_bytes(path, data)
 
     def _save(self, records):
         if not self.readable:
             raise FlowError('原本机资料暂不可读；请取消“记住在这台电脑上”后使用本次输入')
         try:
-            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if self.root.is_symlink():
-                raise ValueError('Invalid private directory')
-            self.root.chmod(0o700)
+            private_directory(self.root)
             if not self.key_path.exists():
                 self._atomic_write(self.key_path, Fernet.generate_key())
             key = self._read(self.key_path, 128)

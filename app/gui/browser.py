@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTabWidget
 from shiboken6 import delete, isValid
+from app.platforms.files import private_directory
 
 
 class TabBridge(QObject):
@@ -42,12 +43,10 @@ class EmbeddedBrowser(QWidget):
         from PySide6.QtWebEngineWidgets import QWebEngineView
         self.Page, self.View = QWebEnginePage, QWebEngineView
         profile_root = root/'embedded-profile'
-        profile_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        profile_root.chmod(0o700)
+        private_directory(profile_root)
         for folder in ('storage', 'cache'):
             path = profile_root/folder
-            path.mkdir(exist_ok=True, mode=0o700)
-            path.chmod(0o700)
+            private_directory(path)
         self.profile = QWebEngineProfile('AppleAutoBuyer', self)
         self.profile.setPersistentStoragePath(str(profile_root/'storage'))
         self.profile.setCachePath(str(profile_root/'cache'))

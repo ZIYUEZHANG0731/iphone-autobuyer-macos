@@ -79,9 +79,9 @@ def test_synthesized_element_cleanup_preserves_parent_and_checks_abi(tmp_path, i
     source = root / 'app/platforms/native/cocoa_accessibility.m'
     compiled = subprocess.run(['xcrun', 'clang', '-O2', '-fno-objc-arc', '-framework', 'Foundation',
                                str(source), str(fixture), '-o', str(executable)],
-                              capture_output=True, text=True, timeout=30)
+                              capture_output=True, text=True, encoding='utf-8', timeout=30)
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
-    result = subprocess.run([str(executable)], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([str(executable)], capture_output=True, text=True, encoding='utf-8', timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     expected = 'PARENT_INTERFACE_PRESERVED' if identifier_type == 'uint32_t' else 'UNSUPPORTED_ABI_REJECTED'
     assert expected in result.stdout

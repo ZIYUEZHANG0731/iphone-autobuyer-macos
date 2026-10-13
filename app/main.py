@@ -11,6 +11,7 @@ if __package__ in (None,''):
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 from app.utils.paths import data_dir
+from app.utils.files import write_private_json
 
 def parser():
     p=argparse.ArgumentParser(description='Apple Store 购买准备与官网试跑')
@@ -23,6 +24,7 @@ def parser():
     p.add_argument('--embedded-smoke-test',action='store_true',help='内嵌浏览器离线启动与正常退出检查')
     p.add_argument('--screenshot',type=Path)
     p.add_argument('--install-browser',action='store_true')
+    p.add_argument('--check-environment',action='store_true',help='离线检查依赖、资源及北京时间；不访问 Apple')
     return p
 
 async def run_cli(args):
@@ -59,13 +61,21 @@ async def run_cli(args):
             # A persistent session could contain account details: deliberately skip it here.
             results.append(result)
     if args.report:
-        args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8');args.report.chmod(0o600)
+        write_private_json(args.report,results)
     return 0 if all(r['state'] not in ('FAILED',) for r in results) else 1
 
 def main():
+    from app.platforms.runtime import prepare_stdio
+    prepare_stdio()
     from app.utils.browser_runtime import prepare_browser_runtime
     prepare_browser_runtime()
     args=parser().parse_args()
+    if args.check_environment:
+        from app.services.environment import check_environment
+        result=check_environment()
+        print(json.dumps(result,ensure_ascii=False),flush=True)
+        if args.report:write_private_json(args.report,result)
+        return 0 if result['ok'] else 1
     if args.install_browser:
         from playwright.__main__ import main as install
         sys.argv=[sys.argv[0],'install','chromium'];return install()
@@ -80,9 +90,7 @@ def main():
             result={'state':'FAILED','message':f'运行未完成（{type(exc).__name__}），请检查环境或浏览器'}
         print(json.dumps(result,ensure_ascii=False),flush=True)
         if args.report:
-            args.report.parent.mkdir(parents=True,exist_ok=True)
-            args.report.write_text(json.dumps([result],ensure_ascii=False,indent=2),encoding='utf-8')
-            args.report.chmod(0o600)
+            write_private_json(args.report,[result])
         return 1
     from PySide6.QtWidgets import QApplication
     from shiboken6 import delete, isValid
@@ -102,6 +110,8 @@ def main():
             if finished[0]:return
             finished[0]=True
             success=value=='Offline embedded startup check'
+            if args.report:
+                write_private_json(args.report,{'check':'embedded','ok':success})
             if args.screenshot and success:
                 args.screenshot.parent.mkdir(parents=True,exist_ok=True);window.grab().save(str(args.screenshot))
             print('EMBEDDED_SMOKE_OK' if success else 'EMBEDDED_SMOKE_FAILED',flush=True)
@@ -119,6 +129,8 @@ def main():
         single_shot(window,12000,embedded_done)
     elif args.smoke_test:
         def done():
+            if args.report:
+                write_private_json(args.report,{'check':'gui','ok':True})
             if args.screenshot:
                 args.screenshot.parent.mkdir(parents=True,exist_ok=True);window.grab().save(str(args.screenshot))
             print('GUI_SMOKE_OK',flush=True);qt.quit()

@@ -12,7 +12,7 @@ class SiteCooldown:
 
     def load(self):
         try:
-            state=json.loads(self.path.read_text())
+            state=json.loads(self.path.read_text(encoding='utf-8'))
             result = {key:float(state.get(key,0)) for key in ('until','last_block','failures','busy_until')}
             result['episode'] = str(state.get('episode', ''))
             return result

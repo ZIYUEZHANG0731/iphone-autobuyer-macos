@@ -354,3 +354,20 @@ def test_window_close_keeps_an_open_browser_worker_alive(qt,tmp_path,monkeypatch
         event=QCloseEvent();window.closeEvent(event)
         assert not event.isAccepted() and not control.stop_event.is_set()
     finally:window.worker=None;window.close();window.deleteLater();qt.processEvents()
+
+
+def test_active_window_stays_accessible_when_tray_is_unavailable(qt, tmp_path, monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QSystemTrayIcon
+    window = MainWindow(tmp_path);window.show()
+    control = Control(False)
+    window.worker = SimpleNamespace(isRunning=lambda: True, control=control, session_open=True)
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: False)
+    try:
+        event = QCloseEvent();window.closeEvent(event)
+        assert not event.isAccepted() and window.isVisible()
+        assert not control.stop_event.is_set()
+        assert '托盘不可用' in window.message_label.text()
+        assert [action.text() for action in window.tray_menu.actions()] == ['显示窗口', '关闭会话', '', '退出软件']
+    finally:
+        window.worker = None;window.close();window.deleteLater();qt.processEvents()

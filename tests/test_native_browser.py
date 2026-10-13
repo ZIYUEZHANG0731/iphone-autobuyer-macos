@@ -6,7 +6,7 @@ from app.automation.browser import BrowserSession, installed_chrome
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(installed_chrome() is None,reason='Native macOS Chrome integration')
+@pytest.mark.skipif(installed_chrome() is None,reason='Native Chrome integration needs installed Google Chrome')
 async def test_native_session_uses_its_own_profile_preserves_cookies_and_closes_its_process(tmp_path):
     old=tmp_path/'browser-profile';old.mkdir();(old/'existing-marker.txt').write_text('preserve')
     async with BrowserSession(tmp_path) as session:
@@ -24,7 +24,7 @@ async def test_native_session_uses_its_own_profile_preserves_cookies_and_closes_
         assert await session.page.evaluate("document.cookie.includes('fixture_session=synthetic')")
         assert await session.page.evaluate("document.cookie.includes('fixture_transient=synthetic')")
     assert process.returncode is not None
-    assert (old/'existing-marker.txt').read_text()=='preserve'
+    assert (old/'existing-marker.txt').read_text(encoding='utf-8')=='preserve'
     assert not (tmp_path/'chrome-profile'/'existing-marker.txt').exists()
     # A normal restart reads only the same app-owned profile, never a daily profile.
     async with BrowserSession(tmp_path) as reopened:
@@ -40,7 +40,7 @@ async def test_native_session_uses_its_own_profile_preserves_cookies_and_closes_
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(installed_chrome() is None,reason='Native macOS Chrome integration')
+@pytest.mark.skipif(installed_chrome() is None,reason='Native Chrome integration needs installed Google Chrome')
 async def test_disconnected_app_can_reattach_its_surviving_chrome_without_logging_in_again(tmp_path):
     import asyncio
     first=BrowserSession(tmp_path)

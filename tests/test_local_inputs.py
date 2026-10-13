@@ -90,7 +90,7 @@ def test_unreadable_inputs_preserve_files_and_do_not_partially_restore_or_overwr
 
 
 def test_atomic_write_failure_keeps_previous_inputs_and_removes_its_temporary_file(tmp_path, monkeypatch):
-    import app.security.local_inputs as module
+    import app.utils.files as module
     store = LocalInputs(tmp_path)
     account_id = str(uuid4())
     account = AppleCredential('fixture@example.invalid', 'Original-Test-Secret')
@@ -102,7 +102,7 @@ def test_atomic_write_failure_keeps_previous_inputs_and_removes_its_temporary_fi
     with pytest.raises(FlowError, match='保存失败'):
         store.put('account', account_id, AppleCredential(account.account, 'Changed-Test-Secret'))
     assert store.path.read_bytes() == before and store.records[account_id]['record']['password'] == account.password
-    assert not list(store.root.glob('.write-*'))
+    assert not list(store.root.glob('*.tmp'))
 
 
 def test_real_gui_processes_remember_edit_delete_and_session_only_choices(tmp_path):
@@ -169,7 +169,7 @@ def test_real_gui_processes_remember_edit_delete_and_session_only_choices(tmp_pa
             QFileDialog.getSaveFileName=lambda *_:(str(exported),'JSON')
             window.export_config()
             with window.repo.connect() as db:raw=db.execute('SELECT data FROM config').fetchone()[0]
-            public=raw+exported.read_text()
+            public=raw+exported.read_text(encoding='utf-8')
             for field in ('fixture@example.invalid','Durable-Test-Secret','format@example.com','00000000000','123X'):
                 assert field not in public and field.encode() not in window.local_inputs.path.read_bytes()
         finally:
@@ -180,6 +180,6 @@ def test_real_gui_processes_remember_edit_delete_and_session_only_choices(tmp_pa
     for phase in ('save', 'reopen', 'remove'):
         result = subprocess.run([sys.executable, '-c', script, str(tmp_path), phase],
                                 cwd=Path(__file__).resolve().parents[1], env=env,
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, encoding='utf-8', timeout=30)
         assert result.returncode == 0, result.stdout + '\n' + result.stderr
         assert 'LOCAL_INPUTS_OK:' + phase in result.stdout

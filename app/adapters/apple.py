@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.platforms.files import protect_path
 import asyncio
 import json
 import re
@@ -654,7 +655,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             # Opt-in proof at the verified bag, before any contact/identity form.
             self.public_screenshot.parent.mkdir(parents=True,exist_ok=True)
             await self.page.screenshot(path=str(self.public_screenshot))
-            self.public_screenshot.chmod(0o600)
+            protect_path(self.public_screenshot)
 
     async def resume_cart(self,config,*,timeout=15):
         """Use an exact existing bag in trials and purchases, without mutations."""
