@@ -23,6 +23,7 @@ from app.adapters.apple_login import AppleLogin
 from app.adapters.apple_consent import AppleConsent
 from app.adapters.controls import ensure_checked
 from app.adapters.checkout_state import checkout_state
+from app.adapters.checkout_updates import CheckoutUpdates
 from app.adapters.apple_pickup import ApplePickup, pickup_date
 from app.adapters.bag_state import bag_has_items
 from app.services.signin import SignInController
@@ -95,6 +96,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.credential_provider=credential_provider
         self.sign_in=sign_in or SignInController()
         self.page_focus=page_focus
+        self.checkout_updates=CheckoutUpdates(page)
         self.page.on("response", self._response)
         self.page.on('domcontentloaded',self._dom_loaded)
 
@@ -102,6 +104,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.dom_ready=True
 
     def detach(self):
+        self.checkout_updates.detach()
         self.page.remove_listener('response',self._response)
         self.page.remove_listener('domcontentloaded',self._dom_loaded)
 
@@ -109,6 +112,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         changed=page is not self.page
         self.detach();self.page=page;self.dom_ready=None;self.last_document_status=200
         if changed:self.auth_service_status=None
+        self.checkout_updates.attach(page)
         page.on('response',self._response);page.on('domcontentloaded',self._dom_loaded)
 
     def _response(self,response):

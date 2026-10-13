@@ -217,7 +217,7 @@ class Worker(QThread):
         if self.action in ('website', 'live'):
             self.review_data = {}
             if self.config.profile_id and self.config.transmit_identity:
-                self.status('正在使用本次填写的取货资料，不读取钥匙串')
+                self.status('正在使用软件中已填写的取货资料，不读取钥匙串')
             identity = IdentityVault.cached(self.config.profile_id) if self.config.profile_id and self.config.transmit_identity else None
             if self.config.profile_id and self.config.transmit_identity and identity is None:
                 raise UserAction('请在“取货人”直接填写姓名、证件后四位、手机号和邮箱，或导入本机 TXT；不会读取旧钥匙串资料')

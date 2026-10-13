@@ -33,11 +33,11 @@ def test_account_dialog_masks_password_and_requires_new_password_for_a_different
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
 
 
-def test_direct_account_entry_defaults_to_session_memory_and_auto_login(qt):
+def test_direct_account_entry_defaults_to_remember_on_this_computer_and_auto_login(qt):
     dialog=AccountDialog()
     try:
         assert dialog.auto_login.isChecked() and dialog.trust_browser.isEnabled()
-        assert dialog.trust_browser.isChecked() and not hasattr(dialog,'persist')
+        assert dialog.trust_browser.isChecked() and dialog.persist.isChecked()
         dialog.auto_login.click()
         assert not dialog.trust_browser.isEnabled()
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
@@ -63,6 +63,7 @@ def test_replacing_a_legacy_account_keeps_the_native_record_without_reading_or_d
     def accept(dialog):
         dialog.account.setText('fixture@example.invalid');dialog.password.setText('Test-Only-Secret')
         dialog.auto_login.setChecked(True);dialog.trust_browser.setChecked(True)
+        dialog.persist.setChecked(False)
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(AccountDialog,'exec',accept)
     window=MainWindow(tmp_path)
@@ -93,6 +94,7 @@ def test_direct_account_entry_never_reads_native_storage_and_session_reference_i
     monkeypatch.setattr(vaults,'credential_backend',lambda:pytest.fail('Session entry must not open secure storage'))
     def accept(dialog):
         dialog.account.setText('session@example.invalid');dialog.password.setText('Session-Only-Test-Secret')
+        dialog.persist.setChecked(False)
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(AccountDialog,'exec',accept)
     window=MainWindow(tmp_path)

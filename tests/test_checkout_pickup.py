@@ -93,6 +93,16 @@ async def test_consent_disappearing_before_fulfillment_loads_is_not_a_pause(chec
     assert not any(k=='consent_required' for k,d in events)
 
 
+async def test_continue_activates_the_observed_button_when_page_keyboard_handlers_prevent_enter(checkout_page):
+    page=checkout_page
+    await page.set_content(pickup_html()+'''<script>
+      document.addEventListener('keydown',event=>{if(event.key==='Enter')event.preventDefault()})
+      </script>''')
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+    assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+
+
 async def test_disabled_target_store_does_not_continue_or_choose_shipping(checkout_page):
     page=checkout_page;await page.set_content(pickup_html(disabled=True))
     with pytest.raises(UserAction,match='目标门店已不可用'):
@@ -105,6 +115,88 @@ async def test_matching_store_name_with_a_different_store_number_does_not_contin
     with pytest.raises(UserAction,match='门店编号与目标门店不一致'):
         await adapter_for(page).fill_customer(contact(),settings())
     assert await page.evaluate('window.pickupClicks')==0
+
+
+def saving_pickup_html():
+    return '''<main><h1>选择取货零售店</h1>
+      <label><input type="radio" name="store" value="R359" onchange="window.busy=true;
+        fetch('/shop/checkout/fulfillment',{method:'POST',body:'synthetic-store-update'})
+          .then(r=>r.json()).catch(()=>{}).finally(()=>window.busy=false)">2 Apple 南京东路 今天可取货</label>
+      <button onclick="if(window.busy){window.ignored++;return;}window.pickupClicks++;
+        document.querySelector('main').innerHTML=window.contactHTML">继续填写取货详情</button>
+      </main><script>window.busy=false;window.ignored=0;window.pickupClicks=0;</script>'''
+
+
+async def test_pickup_continue_waits_for_the_store_update_even_when_the_button_stays_enabled(checkout_page):
+    page=checkout_page
+    async def update(route):
+        await asyncio.sleep(.4)
+        await route.fulfill(content_type='application/json',body='{"saved":true}')
+    await page.route('**/shop/checkout/fulfillment',update)
+    await page.set_content(saving_pickup_html())
+    await page.evaluate('html=>window.contactHTML=html',CONTACT)
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+    assert await page.evaluate('window.ignored')==0
+    assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+
+
+@pytest.mark.parametrize('failure',['server','connection'])
+async def test_failed_store_update_preserves_the_bag_and_does_not_click_continue(checkout_page,failure):
+    page=checkout_page
+    async def update(route):
+        await asyncio.sleep(.2)
+        if failure=='server':
+            await route.fulfill(status=500,content_type='application/json',body='{}')
+        else:
+            await route.abort('connectionfailed')
+    await page.route('**/shop/checkout/fulfillment',update)
+    await page.set_content(saving_pickup_html())
+    adapter=adapter_for(page)
+    with pytest.raises(UserAction,match='取货选择的保存'):
+        await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+    assert await page.evaluate('window.pickupClicks')==0
+    assert not adapter.pickup_continue_attempted and not adapter.add_attempted
+    assert page.url.endswith('Fulfillment-init')
+
+
+async def test_store_save_wait_does_not_wait_for_a_slow_get_resource(checkout_page):
+    page=checkout_page;blocked=asyncio.Event()
+    async def resource(route):
+        blocked.set()
+        await asyncio.Event().wait()
+    await page.route('**/noncritical-resource',resource)
+    await page.set_content(pickup_html())
+    adapter=adapter_for(page)
+    await page.evaluate("()=>{fetch('/noncritical-resource').catch(()=>{})}")
+    await blocked.wait()
+    await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+    assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+
+
+@pytest.mark.parametrize('interruption',['timeout','stop'])
+async def test_waiting_for_a_store_save_remains_interruptible_without_continuing(checkout_page,interruption):
+    page=checkout_page;started=asyncio.Event();release=asyncio.Event()
+    async def update(route):
+        started.set()
+        await release.wait()
+        await route.fulfill(content_type='application/json',body='{}')
+    await page.route('**/shop/checkout/fulfillment',update)
+    await page.set_content(saving_pickup_html())
+    adapter=adapter_for(page)
+    await page.get_by_role('radio',name='2 Apple 南京东路 今天可取货').check()
+    await started.wait()
+    before=monotonic()
+    try:
+        if interruption=='stop':
+            asyncio.get_running_loop().call_later(.05,adapter.control.cancel_task)
+            with pytest.raises(Stopped):await adapter.checkout_updates.ready(adapter.control)
+        else:
+            with pytest.raises(UserAction,match='仍在保存'):await adapter.checkout_updates.ready(adapter.control,timeout=.05)
+        assert monotonic()-before<.4
+        assert await page.evaluate('window.pickupClicks')==0
+    finally:
+        release.set()
 
 
 def fallback_settings():

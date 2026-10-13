@@ -1,8 +1,8 @@
-# Windows 迁移准备（v0.7.3）
+# Windows 迁移准备（v0.7.4）
 
 本轮整理系统依赖和重复流程，保留 macOS 已验证的登录语言、数据目录、凭据服务名称和订单锁。提供 Windows 启动、打包入口；尚未在 Windows 真机执行，不能当成完成了 Windows 移植。
 
-v0.7.3 的账号与取货资料默认直接输入，仅当前进程使用，购买流程不调用 Windows 凭据管理器。旧原生记录和引用保留用于回退。`app/platforms/accessibility.py` 中的表格归属修补仅在 macOS Cocoa / Qt 6.11.2 启用；Windows 打包不编译或携带该 dylib，也不需要 Xcode。
+账号与取货资料直接输入后默认以 `cryptography` 的 Fernet 加密保存在应用私有目录，重开自动载入；可选择仅本次使用。购买流程不调用 Windows 凭据管理器。密钥保存在同一私有目录，安全边界为当前系统账户；旧原生记录和引用保留。`app/platforms/accessibility.py` 中的表格归属修补仅在 macOS Cocoa / Qt 6.11.2 启用；Windows 打包不编译或携带该 dylib，也不需要 Xcode。表格更新前清理辅助功能缓存使用跨平台 Qt 事件。
 
 ## 模块边界
 
@@ -10,6 +10,7 @@ v0.7.3 的账号与取货资料默认直接输入，仅当前进程使用，购�
 | --- | --- |
 | `app/platforms/` | 系统目录、Chrome 位置、原生凭据后端、跨进程锁 |
 | `app/security/vault.py` | 账户与取货人的共同安全读写，类型和服务名分别保留 |
+| `app/security/local_inputs.py` | 直接输入的本机认证加密、原子保存与启动时载入；不调用系统凭据后端 |
 | `app/utils/files.py` | 私有 JSON 的临时文件与原子替换 |
 | `app/utils/power.py` | macOS caffeinate / Windows 线程电源状态 |
 | `app/services/chrome_session.py` | 根据进程参数核对软件 Chrome 的用户、程序与资料目录 |
@@ -44,7 +45,7 @@ python -m venv .venv
 
 预期产物为 `dist\iPhone AutoBuyer\iPhone AutoBuyer.exe`，分发时保留整个目录。Windows 二进制须在 Windows 上构建；macOS 的 `.app` 不能转换成 Windows 程序。[PyInstaller 文档](https://www.pyinstaller.org/en/stable/usage.html#supporting-multiple-operating-systems)
 
-Windows 默认数据目录为 `%LOCALAPPDATA%\Apple AutoBuyer`，浏览器缓存为 `%LOCALAPPDATA%\ms-playwright`。旧原生后端使用 Windows 凭据管理器，禁止明文后端；当前账号和取货资料直接输入后仅在内存使用。新增 Windows 时区数据依赖，预约仍统一为北京时间。POSIX 的 700/600 在 Windows 不等价于访问控制列表，发布验收必须核对当前用户目录的实际权限。
+Windows 默认数据目录为 `%LOCALAPPDATA%\Apple AutoBuyer`，浏览器缓存为 `%LOCALAPPDATA%\ms-playwright`。旧原生后端使用 Windows 凭据管理器，禁止明文后端；当前直接输入通过本机加密文件恢复。新增 Windows 时区数据依赖，预约仍统一为北京时间。POSIX 的 700/600 在 Windows 不等价于访问控制列表，发布验收必须核对当前用户目录的实际权限及 Fernet 依赖打包。
 
 ## 真机验收仍需完成
 

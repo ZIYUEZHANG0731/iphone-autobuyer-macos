@@ -25,7 +25,8 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         from app.automation.browser import BrowserSession
         from app.automation.control import Control
         from app.adapters.apple import AppleAdapter
-        from app.models.config import Settings
+        from app.models.config import Settings, Store, Identity
+        from app.models.flow import Availability
         from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_MORE, NOTICE_VERSION
         from app.gui.window import MainWindow
         from app.utils.qt import prepare_plugins, single_shot
@@ -89,6 +90,22 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     await adapter.guard()
                     assert await session.page.get_by_role('heading',name='Privacy confirmed').count()==1
                     assert await session.page.evaluate('window.accepts')==1
+                    # Activate the page's observed button after restoring the
+                    # GUI-owned view, including a scrolled button.
+                    contact='<h1>取货联系信息</h1>'+''.join('<label>'+label+'<input></label>' for label in
+                        ('姓氏','名字','电子邮件地址','联系人手机号码','政府颁发的身份证件号码的后四位'))+'<button>继续选择付款方式</button>'
+                    await session.page.set_content("""<h1>选择取货零售店</h1>
+                        <label><input type="radio" name="store" value="R359">2 Apple 南京东路 今天可取货</label>
+                        <button style="margin-top:1400px" onclick="window.continues++;document.body.innerHTML=window.contact">继续填写取货详情</button>
+                        <script>window.continues=0</script>""")
+                    await session.page.evaluate('html=>window.contact=html',contact)
+                    adapter.selected=Availability(Store('Apple 南京东路',store_id='R359'),True,'今天可取货')
+                    self.browser_hidden.clear();self.hide_browser.emit()
+                    assert await asyncio.to_thread(self.browser_hidden.wait,3)
+                    config=Settings(stores=[Store('Apple 南京东路',store_id='R359')],transmit_identity=True)
+                    await adapter.fill_customer(Identity('格式测试','居民身份证后四位','123X','00000000000','format@example.com','格','式测试'),config)
+                    assert adapter.identity_filled and await session.page.evaluate('window.continues')==1
+                    adapter.detach()
                     await session.page.goto('https://autobuyer.invalid/embedded')
                     await session.focus_page()
                     await session.context.unroute('**/*',fixture)

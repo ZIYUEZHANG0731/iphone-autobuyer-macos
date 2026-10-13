@@ -97,8 +97,12 @@ class ApplePickup:
             continuation=self.page.get_by_role('button',name='继续填写取货详情',exact=True)
             try:
                 await self._check_radio(target)
+                await self.checkout_updates.ready(self.control)
                 await expect(continuation).to_be_enabled(timeout=8000)
-            except (AssertionError,PlaywrightError,UserAction):
+            except UserAction:
+                await self.guard()
+                raise
+            except (AssertionError,PlaywrightError):
                 await self.guard()
                 fresh=await checkout_state(self.page)
                 current=next((r for r in fresh['radios'] if r['value']==row['value']),None)
@@ -116,7 +120,10 @@ class ApplePickup:
                 self.progress('pickup_changed',{'previous':old.name,'store':store.name,'store_id':store.store_id})
             self.pickup_continue_attempted=True
             self.checkout_last_continued=row['value'];self.checkout_continued_stores.add(row['value'])
-            try:await continuation.click()
+            # Activate this observed, enabled HTML control directly. An input
+            # acknowledgement (mouse/Enter) did not produce a checkout request
+            # in the installed Qt host; do not replay the underlying request.
+            try:await continuation.evaluate('(button) => button.click()')
             except PlaywrightError:
                 raise UserAction('取货门店继续的结果尚未确认；当前购物袋保留，不重复点击') from None
             self.progress('checkout_pickup',{'store':store.name,'store_id':store.store_id,'message':'已核对结账取货门店，等待取货资料页'})

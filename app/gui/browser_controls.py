@@ -33,10 +33,13 @@ class BrowserControls:
     def update_account_status(self):
         saved=bool(self.config.credential_id)
         temporary=CredentialVault().is_temporary(self.config.credential_id)
-        location='本次使用 · 不读写钥匙串' if temporary else '旧保存账号 · 请重新填写'
+        local=self.local_inputs.has(self.config.credential_id)
+        location='本机已保存 · 重开自动载入' if local else '本次使用 · 不读写钥匙串' if temporary else '旧保存账号 · 请重新填写'
         self.account_status.setText(location+' · '+('自动登录已开启' if self.config.auto_login else '自动登录未开启')+(' · 已预选信任此浏览器' if self.config.auto_login and self.config.trust_browser else '') if saved else '尚未填写 Apple 账户')
         self.account_button.setText('管理 Apple 账户…' if saved else '填写 Apple 账号密码…')
-        self.remove_account_button.setText('清除本次账号' if temporary else '不使用旧账号')
+        self.account_button.setAccessibleName(self.account_button.text())
+        self.remove_account_button.setText('删除本机账号' if local else '清除本次账号' if temporary else '不使用旧账号')
+        self.remove_account_button.setAccessibleName(self.remove_account_button.text())
         self.remove_account_button.setEnabled(saved)
 
     def configure_account(self):
@@ -50,13 +53,20 @@ class BrowserControls:
                 if dialog.exec()!=QDialog.DialogCode.Accepted:return
                 credential=dialog.credential();new_id=str(uuid4());old_id=self.config.credential_id
                 previous_settings=settings_for_disk(self.config)
-                vault.remember(new_id,credential,fallback={k:previous_settings[k] for k in ('credential_id','auto_login','trust_browser')})
+                persistent=dialog.persist.isChecked()
+                if not persistent and self.local_inputs.has(old_id):
+                    previous_settings.update(credential_id='',auto_login=False,trust_browser=False)
+                if persistent:self.local_inputs.put('account',new_id,credential)
+                vault.remember(new_id,credential,temporary=not persistent,
+                    fallback={k:previous_settings[k] for k in ('credential_id','auto_login','trust_browser')})
                 updated=deepcopy(self.config);updated.credential_id=new_id;updated.auto_login=dialog.auto_login.isChecked();updated.trust_browser=updated.auto_login and dialog.trust_browser.isChecked()
                 try:self.repo.save_config(updated)
                 except Exception:
+                    self.local_inputs.remove(new_id)
                     vault.forget(new_id);raise
                 self.config=updated;self.redactor.register(credential);self.update_account_status()
-                self.message_label.setText('账号密码本次可用，不读写钥匙串；请提前登录并完成首次验证。')
+                self.message_label.setText('账号密码已加密保存在本机，下次自动载入；请提前完成首次验证。' if persistent else '账号密码仅本次使用，不读写钥匙串。')
+                if self.local_inputs.has(old_id):self.local_inputs.remove(old_id)
                 if old_id and vault.is_temporary(old_id):vault.forget(old_id)
             finally:
                 dialog.password.clear();dialog.previous=None;dialog.deleteLater()
@@ -66,6 +76,12 @@ class BrowserControls:
         if self.worker and self.worker.isRunning() and not self.worker.idle:
             self.message_label.setText('请先停止当前任务，再删除保存的 Apple 账户。');return
         if not self.config.credential_id:return
+        if self.local_inputs.has(self.config.credential_id):
+            reference=self.config.credential_id
+            self.local_inputs.remove(reference)
+            self.config.credential_id='';self.config.auto_login=False;self.config.trust_browser=False
+            self.repo.save_config(self.config);self.update_account_status()
+            self.message_label.setText('本机保存的账号密码已删除，浏览器现有登录仍保留。');return
         if CredentialVault.is_temporary(self.config.credential_id):
             saved=settings_for_disk(self.config)
             CredentialVault.forget(self.config.credential_id)

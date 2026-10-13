@@ -143,7 +143,9 @@ class EmbeddedBrowser(QWidget):
                 result = True
             elif action == 'focus':
                 view = self.views.get(target)
-                if view is not None:self.tabs.setCurrentWidget(view)
+                if view is not None:
+                    self.tabs.setCurrentWidget(view)
+                    view.setFocus(Qt.FocusReason.OtherFocusReason)
                 result = True
             else:
                 raise ValueError('未知浏览器请求')

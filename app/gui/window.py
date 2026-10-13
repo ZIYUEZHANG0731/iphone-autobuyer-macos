@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt,QTimer,Slot,QDateTime,QDate,QTime,QTimeZone,QSize,
 from PySide6.QtGui import QColor,QIcon,QPainter,QPixmap
 from PySide6.QtWidgets import (QMainWindow,QWidget,QFrame,QLabel,QPushButton,QVBoxLayout,QHBoxLayout,QLayout,
  QFormLayout,QStackedWidget,QScrollArea,QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QCheckBox,QDateTimeEdit,
- QTableWidget,QTableWidgetItem,QHeaderView,QListWidget,QListWidgetItem,QAbstractItemView,QPlainTextEdit,QTabWidget,
+ QTableWidgetItem,QHeaderView,QListWidget,QListWidgetItem,QAbstractItemView,QPlainTextEdit,QTabWidget,
  QFileDialog,QMessageBox,QSystemTrayIcon,QProgressBar,QDialog,QSizePolicy,QApplication)
 from app import __version__
 from app.models.config import Settings,Product,Store,Mode,State,STATE_LABELS,ConfigError
@@ -21,6 +21,7 @@ from app.services.storage import Repository
 from app.services.simulation import SCENARIOS
 from app.security.privacy import Redactor
 from app.security.vault import IdentityVault, settings_for_disk
+from app.security.local_inputs import LocalInputs
 from app.gui.worker import Worker
 from app.gui.browser_controls import BrowserControls
 from app.gui.profiles import ProfileControls, ProfileDialog
@@ -34,7 +35,7 @@ from app.utils.paths import resource_path
 from app.utils.scheduling import wall_time,schedule_preview
 from app.services.readiness import preparation_items,PreparationItem
 from app.gui.preparation import PreparationDialog
-from app.gui.widgets import outline_icon,divider,section_header
+from app.gui.widgets import outline_icon,divider,section_header,SnapshotTable
 from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_VERSION, PRIVACY_POLICY_URL
 from app.services.stores import StoreDirectory
 from app.services.network_diagnosis import FAMILY_LABELS
@@ -46,6 +47,9 @@ from app.platforms.accessibility import prepare_accessibility
 class MainWindow(QMainWindow, BrowserControls, ProfileControls):
     def __init__(self,root:Path):
         super().__init__();prepare_accessibility();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
+        self.local_inputs=LocalInputs(root);self.input_restore_error=''
+        try:self.local_inputs.restore(self.redactor)
+        except FlowError as exc:self.input_restore_error=str(exc)
         self.worker=None;self.closing=False;self.catalog_cache=CatalogCache(root);self.catalog=self.catalog_cache.load();self.store_results=[];self.run_events=[]
         self.embedded_browser=None;self.pending_browser_action=None
         self.store_directory=StoreDirectory()
@@ -74,6 +78,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.build_product();self.build_stores();self.build_profiles();self.build_payments();self.build_console();self.build_logs();self.build_browser()
         self.stack.currentChanged.connect(self.page_changed);self.nav[4].setChecked(True);self.stack.setCurrentIndex(4)
         self.populate();self.refresh_profiles();self.refresh_logs()
+        if self.input_restore_error:self.message_label.setText(self.input_restore_error)
         self.timer=QTimer(self);self.timer.timeout.connect(self.tick);self.timer.start(1000);self.tick()
         self.tray=QSystemTrayIcon(self.icon(),self);self.tray.setToolTip('Apple AutoBuyer');self.tray.activated.connect(lambda _:self.showNormal());self.tray.show()
 
@@ -96,7 +101,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
     def card(self):
         frame=QFrame();frame.setObjectName('card');layout=QVBoxLayout(frame);layout.setContentsMargins(14,12,14,12);layout.setSpacing(10);return frame,layout
     def table(self,columns):
-        t=QTableWidget(0,len(columns));t.setHorizontalHeaderLabels(columns);t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch);t.verticalHeader().setVisible(False);t.setAlternatingRowColors(True);t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);return t
+        t=SnapshotTable(0,len(columns));t.setHorizontalHeaderLabels(columns);t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch);t.verticalHeader().setVisible(False);t.setAlternatingRowColors(True);t.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);return t
     def page_changed(self,index):
         self.nav[index].setChecked(True)
         for i,button in enumerate(self.nav):button.setIcon(outline_icon(['box','store','person','card','sliders','document','browser'][i],'#007aff' if i==index else '#3a3a3c'))
@@ -145,8 +150,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.label(c,'备用付款方式','eyebrow');c.addWidget(self.payment_choices.backups)
         self.label(c,'勾选需要的备用方式，可拖动排序。官网会重新确认可用方式与期数。','muted');row.addWidget(frame,1)
         frame,c=self.card();c.addLayout(section_header('填写与下单'));c.addWidget(divider())
-        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写本次输入的取货人信息');c.addWidget(self.transmit)
-        self.label(c,'向 Apple 中国大陆官网填写本次输入的姓名、联系方式和证件后四位。','muted');c.addWidget(divider())
+        self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写已提供的取货人信息');c.addWidget(self.transmit)
+        self.label(c,'向 Apple 中国大陆官网填写已提供的姓名、联系方式和证件后四位。','muted');c.addWidget(divider())
         self.auto=QCheckBox('条件满足后自动提交订单');self.auto.setAccessibleName('允许在预设条件满足时自动提交真实订单');c.addWidget(self.auto)
         self.label(c,'仅用于真实购买。商品、数量、金额、门店和付款方案须通过最终核对；付款由你完成。','muted');c.addStretch()
         self.label(c,'自动提交目前只支持招商银行 24 期；官网缺少最终门店信息时，仍会请你核对。','muted')

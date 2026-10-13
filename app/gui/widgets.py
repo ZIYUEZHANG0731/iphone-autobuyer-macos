@@ -3,9 +3,22 @@ from __future__ import annotations
 
 from functools import lru_cache
 from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QAccessible, QAccessibleTableModelChangeEvent
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTableWidget
+
+
+class SnapshotTable(QTableWidget):
+    """Discard old accessible cells before replacing a whole table snapshot."""
+    def setRowCount(self, count):
+        if QAccessible.isActive():
+            # Cocoa may already have released a cell while Qt's child map still
+            # holds its ID. A reset clears that map before RowsInserted/Removed
+            # walks it; native clients still receive the normal model events.
+            reset = QAccessibleTableModelChangeEvent(
+                self, QAccessibleTableModelChangeEvent.ModelChangeType.ModelReset)
+            QAccessible.updateAccessibility(reset)
+        super().setRowCount(count)
 
 
 PATHS={

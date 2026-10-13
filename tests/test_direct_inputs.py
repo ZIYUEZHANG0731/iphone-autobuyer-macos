@@ -33,6 +33,7 @@ def no_native(monkeypatch):
 
 
 def fill_profile(dialog):
+    dialog.persist.setChecked(False)
     for key,value in {'alias':'格式测试','family_name':'格','given_name':'式测试',
         'document_number':'123X','phone':'00000000000','email':'format@example.com'}.items():
         dialog.fields[key].setText(value)

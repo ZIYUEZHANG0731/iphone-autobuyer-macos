@@ -7,7 +7,7 @@ name = "apple-autobuyer"
 dynamic = ["version"]
 description = "Apple Store preparation, website dry run and guarded desktop automation"
 requires-python = ">=3.12"
-dependencies = ["PySide6==6.11.2", "playwright==1.63.0", "keyring==25.7.0", "portalocker==4.4.0", "psutil==7.2.2", "tzdata==2026.5; sys_platform == 'win32'"]
+dependencies = ["PySide6==6.11.2", "playwright==1.63.0", "keyring==25.7.0", "portalocker==4.4.0", "psutil==7.2.2", "cryptography==50.0.2", "tzdata==2026.5; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "pyinstaller>=6.12,<7"]

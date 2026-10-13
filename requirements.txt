@@ -3,6 +3,7 @@ playwright==1.63.0
 keyring==25.7.0
 portalocker==4.4.0
 psutil==7.2.2
+cryptography==50.0.2
 tzdata==2026.5; sys_platform == "win32"
 pytest>=8,<10
 pytest-asyncio>=1,<2
