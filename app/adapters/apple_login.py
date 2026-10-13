@@ -151,9 +151,14 @@ class AppleLogin:
             elif status is False and auto_recover and config and config.auto_login:
                 try:
                     if not keep:await self.open_store_signin(account)
-                    attempted=await self.auto_sign_in(account,config)
+                    attempted=await self.auto_sign_in(account,config,wait_for_form=True)
                     if attempted:
-                        status=await self.login_status(account)
+                        status=await self.login_status(account,timeout=15)
+                        if status is not True:
+                            keep=True;self.sign_in.pending_page=account
+                            await self.focus_login(account)
+                            raise UserAction('账户登录尚未返回受保护页面；保留登录页，完成官网验证后继续检查')
+                        self.sign_in.authenticated(config.credential_id)
                         keep=False
                 except UserAction:
                     keep=True;self.sign_in.pending_page=account

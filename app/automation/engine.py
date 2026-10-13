@@ -7,7 +7,7 @@ from uuid import uuid4
 from contextlib import nullcontext
 from app.models.config import Settings, Identity, Mode, State, STATE_LABELS, ConfigError
 from app.models.flow import (StateMachine, RunResult, Receipt, FlowError, UserAction, Unavailable,
-                             SubmissionUnknown, Stopped, Availability, RateLimited)
+                             SubmissionUnknown, Stopped, Availability, RateLimited, RetryableRead)
 from app.automation.control import Control, ProcessLock
 from app.services.storage import Repository
 from app.utils.scheduling import future_start
@@ -38,6 +38,7 @@ class Engine:
         self.callback(event)
 
     async def operation(self,func, *, opening_deadline=None):
+        read_retries=0
         while True:
             self.control.check()
             try:
@@ -52,6 +53,13 @@ class Engine:
                         task.cancel()
                         await asyncio.gather(task,return_exceptions=True)
             except UserAction as exc:
+                if isinstance(exc,RetryableRead) and read_retries<3:
+                    read_retries+=1
+                    delay=max(exc.retry_after,5*2**(read_retries-1))
+                    self.emit(self.machine.state,f'官网页面读取暂时失败；{delay:.1f} 秒后恢复第 {read_retries}/3 次，购物袋和已保存步骤保留')
+                    await self.control.sleep(delay)
+                    await self.operation(exc.recover)
+                    continue
                 # Only a rejected public-entry document GET can retry itself.
                 # Login, bag mutations, checkout and submit never use this path.
                 if isinstance(exc, RateLimited) and exc.retry_opening and opening_deadline is not None:
@@ -64,8 +72,10 @@ class Engine:
                 self.emit(State.PAUSED,str(exc))
                 if not self.control.interactive:
                     raise
-                await self.control.wait_resume()
-                self.emit(previous,"你已请求继续，重新检查当前页面")
+                probe=getattr(exc,'ready',None)
+                automatic=await self.control.wait_resume_or(probe) if probe else False
+                if not probe:await self.control.wait_resume()
+                self.emit(previous,getattr(exc,'ready_message','官网验证已完成，继续检查当前页面') if automatic else "你已请求继续，重新检查当前页面")
 
     def choose_store(self,config:Settings,states:list[Availability]):
         acceptable=[]
@@ -103,7 +113,11 @@ class Engine:
                 if mode==Mode.LIVE and config.starts_at:
                     future_start(config.starts_at)
                 if mode==Mode.LIVE and config.starts_at and config.checkout_strategy!='guest' and hasattr(adapter,'check_login'):
-                    await self.operation(adapter.check_login)
+                    async def check_scheduled_login():
+                        checked=await adapter.check_login()
+                        if config.checkout_strategy=='account_only' and checked is not True:
+                            raise UserAction('预约抢购前尚未确认有效 Apple 登录；请完成预登录，现有浏览器保留')
+                    await self.operation(check_scheduled_login)
                 opening_deadline=time.monotonic()+config.max_wait
                 last_refresh_started=time.monotonic()
                 await self.operation(lambda:adapter.prepare(config), opening_deadline=opening_deadline)
@@ -114,7 +128,7 @@ class Engine:
                         rechecked=(target-datetime.now(timezone.utc)).total_seconds()<=600
                         while target>datetime.now(timezone.utc):
                             if not rechecked and (target-datetime.now(timezone.utc)).total_seconds()<=600 and config.checkout_strategy!='guest' and hasattr(adapter,'check_login'):
-                                await self.operation(adapter.check_login)
+                                await self.operation(check_scheduled_login)
                                 rechecked=True
                                 self.emit(State.WAITING,'开售前会话检查结束，继续等待；浏览器未重启')
                             await self.control.sleep(min(1,(target-datetime.now(timezone.utc)).total_seconds()))

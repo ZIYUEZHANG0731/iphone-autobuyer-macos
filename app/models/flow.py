@@ -10,6 +10,21 @@ class FlowError(Exception):
 class UserAction(FlowError):
     pass
 
+class VerificationRequired(UserAction):
+    ready = None
+
+class PendingSave(UserAction):
+    def __init__(self, message, ready):
+        super().__init__(message)
+        self.ready = ready
+        self.ready_message = '官网已完成当前保存，继续核对现有购物袋'
+
+class RetryableRead(UserAction):
+    def __init__(self,message,recover,*,retry_after=0.):
+        super().__init__(message)
+        self.recover=recover
+        self.retry_after=max(0.,float(retry_after))
+
 class RateLimited(UserAction):
     def __init__(self, message, *, retry_after=0., retry_opening=False):
         super().__init__(message)

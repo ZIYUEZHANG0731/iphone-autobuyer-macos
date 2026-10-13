@@ -190,6 +190,96 @@ async def test_signin_uses_normal_pointer_activation_with_browser_input_events(b
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('verification',[False,True])
+async def test_account_recovery_waits_for_late_auth_iframe_and_preserves_verification(browser,verification):
+    import asyncio
+    f=await fixture(browser,outcome=OTP if verification else 'success')
+    # The official sign-in document can finish before it inserts its iframe.
+    # The prior implementation returned False and closed this new login page.
+    late=TOP.replace('<iframe src="%s"></iframe>' % AUTH_URL,
+        '<div id="frame"></div><script>setTimeout(()=>document.querySelector("#frame").innerHTML=\'<iframe src="%s"></iframe>\',600)</script>' % AUTH_URL)
+    await f.context.route('**/shop/signIn/account',lambda route:route.fulfill(
+        content_type='text/html; charset=utf-8',body=late))
+    await f.page.goto('https://secure7.www.apple.com.cn/shop/checkout')
+    try:
+        if verification:
+            with pytest.raises(UserAction,match='验证码'):
+                await asyncio.wait_for(f.adapter.check_login(),8)
+            pending=f.controller.pending_page
+            assert pending is not None and not pending.is_closed()
+            assert await pending.frames[1].locator('input[autocomplete="one-time-code"]').input_value()==''
+            assert len(f.context.pages)==2
+        else:
+            assert await asyncio.wait_for(f.adapter.check_login(),8) is True
+            assert f.context.pages==[f.page]
+        assert len(f.submissions)==1 and len(f.reads)==1
+        assert f.page.url.endswith('/shop/checkout')
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+async def test_completed_human_verification_resumes_automatically_without_second_password_or_otp_input(browser,tmp_path):
+    import asyncio
+    from app.automation.engine import Engine
+    from app.services.storage import Repository
+    f=await fixture(browser,outcome=OTP)
+    control=Control(True);f.adapter.control=control
+    original_progress=f.adapter.progress
+    required=asyncio.Event()
+    def progress(kind,data):
+        original_progress(kind,data)
+        if kind=='verification_required':required.set()
+    f.adapter.progress=progress
+    async def human_step():
+        await asyncio.wait_for(required.wait(),3)
+        frame=f.page.frames[1]
+        assert await frame.locator('input[autocomplete="one-time-code"]').input_value()==''
+        await frame.evaluate('(html)=>document.body.innerHTML=html',TRUST)
+    human=asyncio.create_task(human_step())
+    try:
+        result=await asyncio.wait_for(Engine(Repository(tmp_path/'db.sqlite'),control).operation(
+            lambda:f.adapter.auto_sign_in(f.page)),6)
+        assert result is True and not control.resume_event.is_set()
+        assert len(f.submissions)==1 and len(f.reads)==1
+        assert f.page.url.endswith('/shop/account/home')
+    finally:await human;await f.context.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('return_url',['https://www.apple.com.cn/store','https://www.apple.com.cn/'])
+async def test_successful_authentication_return_to_china_store_follows_protected_account_once(browser,return_url):
+    f=await fixture(browser,top=TOP.replace("location.href='/shop/account/home'",'location.href='+json.dumps(return_url)))
+    store='''<button id="globalnav-menubutton-link-bag" aria-expanded="false" onclick="
+      this.setAttribute('aria-expanded','true');document.querySelector('nav').hidden=false">购物袋</button>
+      <nav id="globalnav-submenu-bag" hidden><a href="/shop/signOut">注销</a>
+      <a href="https://secure7.www.apple.com.cn/shop/account/home">账户</a></nav>'''
+    await f.context.route(return_url,lambda route:route.fulfill(content_type='text/html; charset=utf-8',body=store))
+    try:
+        assert await f.adapter.auto_sign_in(f.page,wait_for_form=True)
+        assert await f.adapter.confirm_login(timeout=.3)
+        assert f.page.url.endswith('/shop/account/home')
+        assert len(f.submissions)==1 and len(f.reads)==1
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
+async def test_checkout_fulfillment_return_is_success_before_pickup_continue_button_appears(browser):
+    f=await fixture(browser)
+    body='''<h1>你希望如何收到订单商品？</h1><button role="radio" aria-checked="true">为我送货</button>
+      <button role="radio" aria-checked="false">我要取货</button><p>有现货，可随时发货。</p>'''
+    await f.context.route('**/shop/checkout',lambda route:route.fulfill(content_type='text/html; charset=utf-8',body=body))
+    await f.context.route('**/shop/account/home',lambda route:route.fulfill(
+        content_type='text/html',body='<script>location.href="/shop/checkout"</script>'))
+    try:
+        assert await f.adapter.auto_sign_in(f.page,wait_for_form=True)
+        assert f.page.url.endswith('/shop/checkout')
+        assert len(f.submissions)==1 and len(f.reads)==1
+        assert f.config.credential_id not in f.controller.attempted
+        assert any(k=='login' and d.get('authenticated') is True for k,d in f.events)
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_collapsed_idms_password_is_not_filled_before_account_continuation(browser):
     body = '''<label>Apple 账户<input id="account"></label>
         <div id="password-step" aria-hidden="true" style="height:0">

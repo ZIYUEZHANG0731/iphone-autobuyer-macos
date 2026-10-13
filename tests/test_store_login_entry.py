@@ -8,8 +8,8 @@ from app.automation.control import Control
 from app.gui.worker import Worker
 from app.models.config import Settings
 from app.models.flow import UserAction
-from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY, shop_signin_url, storefront_page_url, visible_login_form
-from app.services.signin import SignInController, credential_origin
+from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY, shop_signin_url, store_page_url, storefront_page_url, visible_login_form
+from app.services.signin import SignInController, credential_origin, login_top_origin
 
 
 STORE_HTML = '''<h1>Apple Store</h1>
@@ -78,14 +78,14 @@ async def test_slow_signin_navigation_finishes_without_reclick_or_credentials(br
     finally:await context.close()
 
 
-async def store_fixture(browser, menu, *, authenticated=False):
+async def store_fixture(browser, menu, *, authenticated=False, entry=STORE_ENTRY):
     import json
     context = await browser.new_context()
     page = await context.new_page()
     requests = []
     async def respond(route):
         requests.append(route.request.url)
-        body = STORE_HTML.replace('MENU_JSON',json.dumps(menu)) if route.request.url == STORE_ENTRY else FORM_HTML
+        body = STORE_HTML.replace('MENU_JSON',json.dumps(menu)) if route.request.url == entry else FORM_HTML
         if authenticated and route.request.url==ACCOUNT_URL:body='<a href="/shop/signOut">退出登录 测试账户</a>'
         await route.fulfill(content_type='text/html; charset=utf-8',body=body)
     await context.route('**/*',respond)
@@ -255,17 +255,50 @@ async def test_login_keeps_current_query_style_signin_without_navigating_or_read
 
 
 @pytest.mark.e2e
-async def test_login_return_to_store_opens_bag_to_confirm_existing_session(browser):
-    context,page,requests=await store_fixture(browser,REMEMBERED_MENU,authenticated=True)
+@pytest.mark.parametrize('entry',[STORE_ENTRY,'https://www.apple.com.cn/','https://apple.com.cn/'])
+async def test_login_return_to_store_opens_bag_to_confirm_existing_session(browser,entry):
+    context,page,requests=await store_fixture(browser,REMEMBERED_MENU,authenticated=True,entry=entry)
     try:
-        await page.goto(STORE_ENTRY)
+        await page.goto(entry)
         adapter=AppleAdapter(page,Control(False))
         assert await adapter.confirm_login(timeout=1)
         controller=SignInController()
         controller.attempted.add('fixture-id')
         assert await controller._success(page,Settings(credential_id='fixture-id'),lambda *_:None)
-        assert not controller.attempted and requests==[STORE_ENTRY,ACCOUNT_URL]
+        assert not controller.attempted and requests==[entry,ACCOUNT_URL]
     finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_homepage_remembered_name_is_not_a_validated_login(browser):
+    entry='https://www.apple.com.cn/'
+    context,page,requests=await store_fixture(browser,REMEMBERED_MENU,entry=entry)
+    events=[]
+    try:
+        await page.goto(entry)
+        adapter=AppleAdapter(page,Control(False),progress=lambda kind,data:events.append((kind,data)))
+        assert await adapter.login_status(timeout=1) is False
+        assert requests==[entry,ACCOUNT_URL]
+        assert not any(kind=='login' and data.get('authenticated') is True for kind,data in events)
+        assert await page.get_by_role('textbox',name='电子邮件或电话号码').input_value()==''
+    finally:await context.close()
+
+
+@pytest.mark.parametrize('url,allowed',[
+    ('https://www.apple.com.cn/',True),
+    ('https://apple.com.cn',True),
+    ('https://www.apple.com.cn/store',True),
+    ('https://www.apple.com/de/',False),
+    ('https://www.apple.com.cn.attacker.invalid/',False),
+    ('https://secure7.www.apple.com.cn/',False),
+    ('https://www.apple.com.cn:8443/',False),
+    ('https://evil@www.apple.com.cn/',False),
+    ('http://www.apple.com.cn/',False),
+])
+def test_china_store_return_pages_keep_exact_origins_and_do_not_accept_credentials(url,allowed):
+    assert store_page_url(url) is allowed
+    assert login_top_origin(url) is allowed
+    assert not credential_origin(url)
 
 
 @pytest.mark.e2e

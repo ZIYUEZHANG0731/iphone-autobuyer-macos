@@ -23,6 +23,7 @@ def parser():
     p.add_argument('--smoke-test',action='store_true')
     p.add_argument('--embedded-smoke-test',action='store_true',help='内嵌浏览器离线启动与正常退出检查')
     p.add_argument('--screenshot',type=Path)
+    p.add_argument('--window-on-top',action='store_true',help='将软件窗口置顶，便于查看官网流程')
     p.add_argument('--install-browser',action='store_true')
     p.add_argument('--check-environment',action='store_true',help='离线检查依赖、资源及北京时间；不访问 Apple')
     return p
@@ -98,7 +99,8 @@ def main():
     from app.gui.window import MainWindow
     prepare_plugins()
     qt=QApplication(sys.argv[:1]);qt.setApplicationName('iPhone AutoBuyer');qt.setOrganizationName('AppleAutoBuyer')
-    window=MainWindow(data_dir());window.show()
+    window=MainWindow(data_dir());window.pin_window.setChecked(args.window_on_top);window.show()
+    if args.window_on_top and window.config.browser_kind=='embedded':window.ensure_embedded()
     qt.aboutToQuit.connect(window.shutdown)
     if args.embedded_smoke_test:
         from PySide6.QtCore import QUrl

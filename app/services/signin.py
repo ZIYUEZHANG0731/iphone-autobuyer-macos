@@ -1,12 +1,13 @@
 """One normal, visible Apple sign-in attempt. No auth endpoints or OTP replay."""
 import asyncio
+from datetime import datetime, timezone
 import re
 from urllib.parse import urlsplit
 
 from playwright.async_api import Error as PlaywrightError, expect
 
 from app.models.config import apple_url
-from app.models.flow import UserAction
+from app.models.flow import UserAction, VerificationRequired
 from app.services.login import (apple_auth_url, shop_signin_url,
     store_page_url, follow_store_account, authenticated_account_page, visible_password)
 
@@ -26,7 +27,7 @@ def credential_origin(url):
 
 def login_top_origin(url):
     return ((apple_url(url) and urlsplit(url).path.startswith('/shop/'))
-            or credential_origin(url))
+            or store_page_url(url) or credential_origin(url))
 
 
 async def auth_frames(page):
@@ -109,6 +110,14 @@ class SignInController:
             return False
         try:
             return await self._run(page, config, provider, guard, control, progress, timeout, wait_for_form)
+        except VerificationRequired as exc:
+            async def verified_return():
+                await guard()
+                if await sign_in_form(page):return False
+                if await self._trust(await auth_frames(page),config,guard,progress):return False
+                return await self._success(page,config,progress)
+            exc.ready=verified_return
+            raise
         except (PlaywrightError, AssertionError):
             # Playwright can include a typed value in its diagnostic; never pass it on.
             # An auth iframe can disappear during the successful parent return.
@@ -138,9 +147,9 @@ class SignInController:
                 raise UserAction('Apple 未接受账户登录；请检查账户或密码，软件不会再次提交')
             codes = frame.locator('input[autocomplete="one-time-code"], input[inputmode="numeric"][maxlength="1"]').filter(visible=True)
             if await codes.count() or re.search(r'请输入.{0,8}验证码|输入.{0,8}六位|验证码已发送|双重认证|verification code|two.factor authentication|安全问题|security questions', text, re.I):
-                message = 'Apple 要求验证码或安全验证；已保留登录页面，请在官网完成后继续检查'
+                message = 'Apple 要求验证码或安全验证；已保留登录页面，完成后软件自动检查并继续'
                 progress('verification_required', {'kind': 'apple_account', 'message': message})
-                raise UserAction(message)
+                raise VerificationRequired(message)
 
     async def _trust(self, frames, config, guard, progress):
         for frame in frames:
@@ -174,11 +183,15 @@ class SignInController:
             if await follow_store_account(page):return False
         if await authenticated_account_page(page):
             self.authenticated(config.credential_id)
+            progress('login',{'authenticated':True,'status':'authenticated','checked_at':datetime.now(timezone.utc).isoformat()})
             return True
         if path.rstrip('/') == '/shop/checkout':
-            for name in ('同意并继续', '继续填写取货详情', '继续选择付款方式', '检查订单', '立即下单'):
-                if await page.get_by_role('button', name=name, exact=True).is_visible():
+            returns=(('radio','我要取货'),)+tuple(('button',name) for name in
+                ('同意并继续','继续填写取货详情','继续选择付款方式','检查订单','立即下单'))
+            for role,name in returns:
+                if await page.get_by_role(role, name=name, exact=True).is_visible():
                     self.authenticated(config.credential_id)
+                    progress('login',{'authenticated':True,'status':'authenticated','checked_at':datetime.now(timezone.utc).isoformat()})
                     progress('auto_login', {'status': 'checkout_returned', 'message': '账户登录已返回官网结账，继续保留当前购物袋'})
                     return True
         return False

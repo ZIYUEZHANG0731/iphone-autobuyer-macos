@@ -13,10 +13,11 @@ import pytest
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('native_desktop',[False,pytest.param(True,marks=pytest.mark.skipif(os.name!='nt',reason='Windows native Qt input'))])
 @pytest.mark.parametrize(('method','months'),[
     ('招商银行',24),('支付宝',24),('微信支付',24),('中国建设银行',6),
 ])
-def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly(tmp_path,method,months):
+def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly(tmp_path,method,months,native_desktop):
     script=textwrap.dedent('''
         import asyncio
         import sys
@@ -39,6 +40,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         prepare_plugins()
         qt=QApplication(['embedded-regression'])
         window=MainWindow(Path(sys.argv[1]))
+        window.setWindowTitle('AutoBuyer embedded offline fixture')
         window.show()
         info=window.ensure_embedded()
         assert window.embedded_browser.profile.httpAcceptLanguage()=='zh-CN,zh;q=0.9'
@@ -149,11 +151,11 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                         auth=route.request.url.startswith('https://idmsa.apple.com.cn/')
                         body="""<label>电子邮件或电话号码<input></label><label>密码<input type="password"></label>
                           <label><input type="checkbox">记住我的账户</label>
-                          <button id="sign-in" onclick="parent.postMessage('fixture-authenticated','https://secure.www.apple.com.cn')">登录</button>""" if auth else """
+                          <button id="sign-in" onclick="parent.postMessage({kind:'fixture-authenticated',trusted:event.isTrusted},'https://secure.www.apple.com.cn')">登录</button>""" if auth else """
                           <iframe style="height:500px;width:100%" src="https://idmsa.apple.com.cn/appleauth/auth/signin"></iframe>
-                          <script>window.loginReturns=0;addEventListener('message',e=>{
-                            if(e.origin==='https://idmsa.apple.com.cn'&&e.data==='fixture-authenticated'){
-                              window.loginReturns++;document.body.innerHTML='<h1>取货联系信息</h1><button>继续选择付款方式</button>';
+                          <script>window.loginReturns=0;window.trustedLogin=false;addEventListener('message',e=>{
+                            if(e.origin==='https://idmsa.apple.com.cn'&&e.data.kind==='fixture-authenticated'){
+                              window.loginReturns++;window.trustedLogin=e.data.trusted;document.body.innerHTML='<h1>取货联系信息</h1><button>继续选择付款方式</button>';
                             }})</script>"""
                         await route.fulfill(content_type='text/html; charset=utf-8',body=body)
                     await session.context.route('**/*',signin_fixture)
@@ -198,7 +200,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         assert not isValid(window)
         print('EMBEDDED_PROFILE_OK:'+phase,flush=True)
     ''')
-    env={**os.environ,'QT_QPA_PLATFORM':'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path)}
+    env={**os.environ,'QT_QPA_PLATFORM':'windows' if native_desktop else 'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path)}
     for phase in ('save','reopen'):
         result=subprocess.run([sys.executable,'-c',script,str(tmp_path),phase,method,str(months)],
                               cwd=Path(__file__).resolve().parents[1],env=env,

@@ -147,7 +147,7 @@ class BrowserSession:
         # primary page while closing those restored app-profile tabs before
         # any fresh authentication starts. Live-process recovery and borrowed
         # daily/embedded contexts never use this startup cleanup.
-        self.page=await self.context.new_page()
+        self.page=await self.new_page()
         deadline=time.monotonic()+2
         quiet_since=time.monotonic()
         while True:
@@ -172,7 +172,21 @@ class BrowserSession:
         raise FlowError('内置浏览器的新页面暂未连接')
 
     async def new_page(self):
-        if not self.embedded:return await self.context.new_page()
+        if not self.embedded:
+            # CDP Target.createTarget has no action timeout. A crashed or
+            # occluded browser must not leave a GUI command pending forever.
+            task=asyncio.create_task(self.context.new_page())
+            deadline=time.monotonic()+15
+            try:
+                while not task.done():
+                    if self.stop_check:self.stop_check()
+                    if time.monotonic()>=deadline:
+                        raise FlowError('浏览器检查页未能在 15 秒内打开；现有购物袋保留，请重新打开会话')
+                    await asyncio.sleep(.1)
+                return await task
+            finally:
+                if not task.done():
+                    task.cancel();await asyncio.gather(task,return_exceptions=True)
         target=await self.embedded['bridge'].request('new')
         return await self.target_page(target)
 

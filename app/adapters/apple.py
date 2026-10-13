@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 from playwright.async_api import Page, Locator, expect, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from app.models.config import Store, Mode, apple_url, money
-from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, Receipt, SubmissionUnknown
+from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, Receipt, SubmissionUnknown, RetryableRead
 from app.automation.control import Control
 from app.services.payment import PaymentStore
 from app.services.payment_methods import payment_matches, payment_months, payment_app
@@ -62,6 +62,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.opening_retry = False
         self.response_episode = uuid4().hex
         self.last_document_status = 200
+        self.last_document_method = ''
         self.limited_until = 0.0
         self.selected = None
         self.privacy_seen = False
@@ -118,6 +119,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
     def bind_page(self,page):
         changed=page is not self.page
         self.detach();self.page=page;self.dom_ready=None;self.last_document_status=200
+        self.last_document_method=''
         if changed:
             self.auth_service_status=None
             self.checkout_pickup_confirmed=None
@@ -147,6 +149,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             self.dom_ready=False;self.navigation_started=asyncio.get_running_loop().time()
             self.response_episode=uuid4().hex
             self.last_document_status=response.status
+            self.last_document_method=getattr(response.request,'method','')
         if response.status==503:
             path=urlsplit(response.url).path
             resource_type=response.request.resource_type
@@ -229,6 +232,19 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
                                   retry_after=remaining,retry_opening=self.opening_retry)
             self.http_status = 200
             self.opening_retry = False
+        if (page is self.page and self.last_document_status in (500,502,503,504)
+                and self.last_document_method=='GET' and not self.submit_attempted
+                and urlsplit(page.url).path.rstrip('/') in ('/shop/bag','/shop/checkout')):
+            failed_url=page.url
+            async def reload_read():
+                # Only the failed document GET is repeatable. Never replay a
+                # POST, authentication endpoint, AJAX write or submit action.
+                if (page is not self.page or self.submit_attempted or not apple_url(page.url)
+                        or page.url!=failed_url):
+                    raise UserAction('当前页面已变化，保留购物袋，请重新检查')
+                await page.reload(wait_until='domcontentloaded',timeout=15000)
+            raise RetryableRead('官网结账页面读取失败，现有购物袋保留',reload_read,
+                retry_after=max(0,self.busy_until-asyncio.get_running_loop().time()))
         if not allow_busy and asyncio.get_running_loop().time()<self.busy_until:
             raise UserAction(f'官网暂时繁忙，请等待 {int(self.busy_until-asyncio.get_running_loop().time())+1} 秒后继续；已有操作不重复提交')
         await self.handle_consent(page,text)

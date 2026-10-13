@@ -2,7 +2,7 @@
 
 日期：2026-10-13。目标优先级：Windows 11 x64。
 
-> 后续 Windows 真机工作已在同分支推进到 **v0.7.10 / build 53**：源码全量 **614 passed / 3 macOS skipped**，保留已合入的 macOS `main` `9d9dada` 共享修复。软件专用 Chrome 的源码流程及实际便携版分别在 **60.78 秒、62.02 秒**完成真实官网核对：紫色 256GB iPhone 17、数量 1、RMB 6,799、环球港、支付宝全额，零订单提交。首次日常 Chrome 扩展授予及内置浏览器新版核对仍单独记录。最新证据及剩余工作见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
+> 后续 Windows 真机工作已在同分支推进到 **v0.7.13 / build 56**：最终源码 **653 passed / 3 macOS skipped**，保留 macOS `9d9dada` 的共享修复，并迁入最新 `0959596` 的中国官网首页返回处理。内置浏览器及软件专用 Chrome 的实际便携版均自动完成真实官网核对，无人工继续和真实提交；完整连续 Demo 留在本机。最终分发包、独立证据及真实提交的剩余范围见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
 
 - 分支：[`codex/windows-port`](https://github.com/ZIYUEZHANG0731/iphone-autobuyer-macos/tree/codex/windows-port)。
 - 适配及测试提交：`f1104f905c754a05a56fbb20850958ef611dae1a`（v0.7.6 / build 44）；本交接文档随后在同分支追加。克隆后用 `git log -2 --oneline` 查看代码提交和文档提交，用 `git rev-parse HEAD` 记录本次验收实际版本。

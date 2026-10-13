@@ -245,6 +245,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.close_session_button=self.button(row,'关闭会话',self.close_session);self.close_session_button.setEnabled(False);r.addLayout(row)
         self.keep_awake=QCheckBox('会话期间防止电脑自动睡眠');r.addWidget(self.keep_awake)
         self.keep_awake.setToolTip('建议连接电源。停止任务会保留浏览器会话，关闭会话才会退出浏览器。')
+        self.pin_window=QCheckBox('窗口置顶');r.addWidget(self.pin_window)
+        self.pin_window.toggled.connect(self.set_window_pinned)
         r.addWidget(divider());self.label(r,'停止任务会保留浏览器会话。','muted');r.addSpacing(8);r.addWidget(divider())
         row=QHBoxLayout();self.button(row,'查看付款二维码',self.show_payment);self.button(row,'提取当前付款码',self.request_payment);r.addLayout(row)
         self.help_button=self.button(r,'使用帮助',self.show_help,'link');self.help_button.setIcon(outline_icon('help','#007aff'))
@@ -286,6 +288,10 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
 
     def current_zone(self):
         return 'Asia/Shanghai'
+
+    def set_window_pinned(self,enabled):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,enabled)
+        self.show()
 
     def refresh_plan_summary(self,config=None):
         config=config or self.collect();p=config.product
@@ -516,6 +522,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
                 'login':'预登录','login_check':'登录复核','login_diagnosis':'登录问题诊断','catalog':'商品目录','options':'商品选项',
                 'stores':'门店查询','receipt':'订单核对','local':'本地异常测试 · 合成数据'}
         self.banner.setText(labels.get(action,'Apple 官网 · 软件浏览器'))
+        if config.browser_kind=='embedded':
+            self.set_browser_settings_visible(action not in ('website','live'))
         self.stack.setCurrentIndex(6 if config.browser_kind=='embedded' and action in ('login','login_diagnosis') else 4);self.message_label.setText('正在启动任务…')
     @Slot(dict)
     def on_event(self,event):
@@ -527,7 +535,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.update_resume();self.run_events.append(event)
         stages=list(State)
         if state in stages:self.progressbar.setValue(min(12,stages.index(state)))
-        if state in ('ORDER_CONFIRMED','PAYMENT_PENDING','ORDER_UNCERTAIN','PAUSED'):
+        if state in ('ORDER_CONFIRMED','PAYMENT_PENDING','ORDER_UNCERTAIN','PAUSED','FAILED'):
             self.tray.showMessage('Apple AutoBuyer',message,QSystemTrayIcon.MessageIcon.Information,10000)
     @Slot(str,object)
     def on_data(self,kind,data):

@@ -72,3 +72,17 @@ class Control:
         while not self.resume_event.is_set():
             await self.sleep(.15)
         self.resume_event.clear()
+
+    async def wait_resume_or(self,probe):
+        while not self.resume_event.is_set():
+            self.check()
+            try:
+                if await asyncio.wait_for(probe(),3):
+                    return True
+            except Exception:
+                # A page can navigate during an observation. Keep waiting;
+                # this never resubmits credentials or fills a verifier.
+                pass
+            await self.sleep(1)
+        self.resume_event.clear()
+        return False

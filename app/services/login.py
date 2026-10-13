@@ -37,14 +37,21 @@ def shop_signin_url(url):
 
 
 def store_page_url(url):
-    return apple_url(url) and urlsplit(url).path.rstrip('/') == '/store'
+    if not apple_url(url):
+        return False
+    parsed = urlsplit(url)
+    # Normal successful sign-in can return to either public China landing page.
+    # The account link still has to confirm a protected, authenticated page.
+    return (parsed.path.rstrip('/') == '/store'
+            or (parsed.hostname in ('www.apple.com.cn', 'apple.com.cn')
+                and parsed.path in ('', '/')))
 
 
 def storefront_page_url(url):
     if not apple_url(url):
         return False
     path = urlsplit(url).path.rstrip('/')
-    return (path in ('/store', '/shop/bag', '/shop/buy-iphone')
+    return (store_page_url(url) or path in ('/shop/bag', '/shop/buy-iphone')
             or path.startswith('/shop/buy-iphone/'))
 
 

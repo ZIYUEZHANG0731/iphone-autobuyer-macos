@@ -292,3 +292,20 @@ async def test_worker_cooldown_applies_to_new_commands_and_configuration_is_a_sn
     assert worker.enqueue('login',original)
     original.product.name='edited after enqueue'
     assert worker.commands.get_nowait()[1].product.name!='edited after enqueue'
+
+
+async def test_stopping_a_stalled_login_command_cancels_its_wait_without_closing_session(tmp_path,monkeypatch):
+    worker=Worker('login_check',local_config(),tmp_path)
+    worker.session_open=True
+    entered=asyncio.Event();cancelled=asyncio.Event()
+    async def hung_command(*_):
+        entered.set()
+        try:await asyncio.Future()
+        finally:cancelled.set()
+    monkeypatch.setattr(worker,'browser_action',hung_command)
+    task=asyncio.create_task(worker.cancelable_action(object(),None))
+    await asyncio.wait_for(entered.wait(),1)
+    worker.stop_task()
+    with pytest.raises(Stopped):await asyncio.wait_for(task,1)
+    assert cancelled.is_set() and worker.session_open
+    assert not worker.control.stop_event.is_set()

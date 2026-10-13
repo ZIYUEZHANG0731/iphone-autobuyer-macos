@@ -106,6 +106,19 @@ async def test_engine_blocks_expired_schedule_before_website_request_but_can_rec
     assert reconciled.state == 'PAYMENT_PENDING' and not calls
 
 
+@pytest.mark.parametrize('authenticated',[False,None])
+async def test_account_only_schedule_cannot_begin_waiting_with_an_unverified_session(tmp_path,authenticated):
+    config=configured();config.checkout_strategy='account_only'
+    config.starts_at=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat()
+    requests=[]
+    async def login():requests.append('protected-check');return authenticated
+    async def prepare(_):requests.append('product')
+    adapter=SimpleNamespace(check_login=login,prepare=prepare)
+    result=await Engine(Repository(tmp_path/'db.sqlite'),Control(False)).run(config,adapter,Mode.LIVE)
+    assert result.state=='PAUSED' and requests==['protected-check']
+    assert not any(e['state']=='WAITING' for e in result.steps)
+
+
 def test_stock_history_records_changes_only_and_separates_product_configurations(tmp_path):
     repo = Repository(tmp_path / 'db.sqlite')
     product = configured().product

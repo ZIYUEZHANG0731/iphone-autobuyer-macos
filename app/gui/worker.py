@@ -149,7 +149,7 @@ class Worker(QThread):
             if self.config.browser_kind=='daily_chrome':
                 self.status('请在日常 Chrome 的 Welcome 连接页选择 Apple 中国商店页面并允许本次连接；等待最多 10 分钟，可随时停止…')
             async with KeepAwake(self.config.keep_awake), BrowserSession(self.root, headless=self.headless,embedded=self.embedded,
-                    kind=self.config.browser_kind,stop_check=self.control.check_session) as session:
+                    kind=self.config.browser_kind,stop_check=self.control.check) as session:
                 self.session_open=True
                 browser_kind='daily_chrome' if self.config.browser_kind=='daily_chrome' else 'embedded' if session.embedded else 'chrome'
                 self.session_kind=browser_kind
@@ -166,7 +166,11 @@ class Worker(QThread):
                             self.control.check()
                             if self.action=='login_diagnosis' and diagnosis.context is None:
                                 await diagnosis.start(session.context,session.page)
-                            result = await self.browser_action(session, repo)
+                            # Engine owns cancellation after the submit lock.
+                            # Other commands can be cancelled while CDP or a
+                            # navigation is waiting, retaining the same browser.
+                            result = await (self.browser_action(session, repo)
+                                if self.action in ('website','live') else self.cancelable_action(session,repo))
                         except Stopped:
                             if self.control.stop_event.is_set():
                                 raise
@@ -194,6 +198,16 @@ class Worker(QThread):
                     await asyncio.gather(watcher, return_exceptions=True)
                     await diagnosis.close()
                     self.session_open=False
+
+    async def cancelable_action(self,session,repo):
+        task=asyncio.create_task(self.browser_action(session,repo))
+        try:
+            while not task.done():
+                await self.control.sleep(.1)
+            return await task
+        finally:
+            if not task.done():
+                task.cancel();await asyncio.gather(task,return_exceptions=True)
 
     async def browser_action(self, session, repo):
         if self.action not in ('environment','receipt') and time.monotonic()<self.limited_until:
@@ -249,24 +263,26 @@ class Worker(QThread):
                     return {'state':'COMPLETED','message':'原有登录仍有效。继续使用同一浏览器会话，无需重新登录'}
                 await adapter.focus_login(session.page)
                 message='已从购物袋进入登录诊断，请在官网完成一次登录，遇到错误后可查看控制台的请求记录。完成后点“继续检查”。' if diagnostic else '已从商店购物袋打开登录页，请在软件浏览器完成 Apple 登录和验证，再点“继续检查”。此浏览器会保持打开。'
+                resume_probe=None
                 if self.config.auto_login and not diagnostic:
                     try:
-                        if await adapter.auto_sign_in(session.page):
+                        if await adapter.auto_sign_in(session.page,wait_for_form=True):
                             await adapter.confirm_login();return {'state':'COMPLETED','message':'已使用保存的账户登录并确认；浏览器会话持续保留'}
                     except UserAction as exc:
                         if isinstance(exc,RateLimited):raise
-                        message=str(exc);self.sign_in.pending_page=session.page
+                        message=str(exc);resume_probe=getattr(exc,'ready',None);self.sign_in.pending_page=session.page
                         await adapter.focus_login(session.page)
                 self.status(message, 'PAUSED')
                 if not self.control.interactive:
                     return {'state': 'PAUSED', 'message': '等待你在 Apple 官网登录'}
-                await self.control.wait_resume()
+                if resume_probe:await self.control.wait_resume_or(resume_probe)
+                else:await self.control.wait_resume()
                 if hasattr(session,'ensure_page'):
                     original=adapter.page
                     current=await session.ensure_page(prefer_account=True)
                     if current is not original:
                         adapter.bind_page(current)
-                if self.config.auto_login and not diagnostic:await adapter.auto_sign_in(adapter.page)
+                if self.config.auto_login and not diagnostic:await adapter.auto_sign_in(adapter.page,wait_for_form=True)
                 await adapter.confirm_login()
                 self.sign_in.authenticated(self.config.credential_id)
                 return {'state': 'COMPLETED', 'message': '已确认登录。浏览器会话持续保留，可直接设置开售时间并开始等待'}

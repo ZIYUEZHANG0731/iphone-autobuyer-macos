@@ -12,23 +12,35 @@ from app.services.daily_chrome import EXTENSION_URL
 class BrowserControls:
     def build_browser(self):
         page=QWidget();self.browser_layout=QVBoxLayout(page);self.browser_layout.setContentsMargins(24,18,24,16);self.browser_layout.setSpacing(12)
-        self.label(self.browser_layout,'官网浏览器','title')
-        self.browser_hint=self.label(self.browser_layout,'直接填写 Apple 账号密码并提前完成首次验证，购买时沿用同一浏览器。验证码仍在官网页面填写。','muted')
+        header=QHBoxLayout();self.label(header,'官网浏览器','title');header.addStretch()
+        self.browser_settings_button=self.button(header,'收起登录设置',self.toggle_browser_settings)
+        self.browser_layout.addLayout(header)
+        self.browser_settings=QWidget();settings=QVBoxLayout(self.browser_settings)
+        settings.setContentsMargins(0,0,0,0);settings.setSpacing(12)
+        self.browser_layout.addWidget(self.browser_settings)
+        self.browser_hint=self.label(settings,'直接填写 Apple 账号密码并提前完成首次验证，购买时沿用同一浏览器。验证码仍在官网页面填写。','muted')
         account_row=QHBoxLayout()
         self.account_status=QLabel();self.account_status.setObjectName('muted');account_row.addWidget(self.account_status,1)
         self.account_button=self.button(account_row,'填写 Apple 账号密码…',self.configure_account)
         self.remove_account_button=self.button(account_row,'删除保存账号',self.remove_account)
-        self.browser_layout.addLayout(account_row)
-        row=QHBoxLayout();self.button(row,'内置浏览器登录',self.login_embedded,'primary');self.button(row,'独立 Chrome 登录',self.login_chrome);row.addStretch();self.browser_layout.addLayout(row)
+        settings.addLayout(account_row)
+        row=QHBoxLayout();self.button(row,'内置浏览器登录',self.login_embedded,'primary');self.button(row,'独立 Chrome 登录',self.login_chrome);row.addStretch();settings.addLayout(row)
         row=QHBoxLayout();self.button(row,'已完成登录，检查',self.complete_browser_login)
-        self.button(row,'检查登录状态',lambda:self.launch('login_check'));self.button(row,'记录登录问题',lambda:self.launch('login_diagnosis'));row.addStretch();self.browser_layout.addLayout(row)
-        row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome,'primary');self.button(row,'安装 Chrome 连接扩展…',self.open_chrome_extension);row.addStretch();self.browser_layout.addLayout(row)
-        self.label(self.browser_layout,'日常 Chrome：先在官网正常登录，再通过 Microsoft 官方 Playwright 扩展选择一个 Apple 中国商店页面。关闭软件会话会断开连接，Chrome 和原有登录继续保留。','muted')
-        self.browser_session_note=self.label(self.browser_layout,'登录诊断会随实际运行的浏览器记录；切换浏览器需要先关闭当前会话。','muted')
-        self.network_note=self.label(self.browser_layout,'登录期间自动记录本机网络变化；已有会话与验证码在同一浏览器保留。','muted')
+        self.button(row,'检查登录状态',lambda:self.launch('login_check'));self.button(row,'记录登录问题',lambda:self.launch('login_diagnosis'));row.addStretch();settings.addLayout(row)
+        row=QHBoxLayout();self.button(row,'接入日常 Chrome',self.connect_daily_chrome,'primary');self.button(row,'安装 Chrome 连接扩展…',self.open_chrome_extension);row.addStretch();settings.addLayout(row)
+        self.label(settings,'日常 Chrome：先在官网正常登录，再通过 Microsoft 官方 Playwright 扩展选择一个 Apple 中国商店页面。关闭软件会话会断开连接，Chrome 和原有登录继续保留。','muted')
+        self.browser_session_note=self.label(settings,'登录诊断会随实际运行的浏览器记录；切换浏览器需要先关闭当前会话。','muted')
+        self.network_note=self.label(settings,'登录期间自动记录本机网络变化；已有会话与验证码在同一浏览器保留。','muted')
         self.browser_holder=QWidget();self.browser_holder_layout=QVBoxLayout(self.browser_holder);self.browser_holder_layout.setContentsMargins(0,0,0,0)
         self.browser_placeholder=self.label(self.browser_holder_layout,'选择内置浏览器或独立 Chrome 登录。完成后可回控制台设置开售时间。','muted');self.browser_holder_layout.addStretch();self.browser_layout.addWidget(self.browser_holder,1)
         self.stack.addWidget(page)
+
+    def set_browser_settings_visible(self,visible):
+        self.browser_settings.setVisible(visible)
+        self.browser_settings_button.setText('收起登录设置' if visible else '展开登录设置')
+
+    def toggle_browser_settings(self):
+        self.set_browser_settings_visible(self.browser_settings.isHidden())
 
     def update_account_status(self):
         saved=bool(self.config.credential_id)

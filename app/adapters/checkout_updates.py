@@ -3,7 +3,7 @@ import asyncio
 from urllib.parse import urlsplit
 
 from app.models.config import apple_url
-from app.models.flow import UserAction
+from app.models.flow import UserAction, PendingSave
 
 
 class CheckoutUpdates:
@@ -61,7 +61,7 @@ class CheckoutUpdates:
             self.failed = True
             self.changed.set()
 
-    async def ready(self, control, timeout=8, *, label='取货选择'):
+    async def ready(self, control, timeout=30, *, label='取货选择'):
         deadline = asyncio.get_running_loop().time() + timeout
         while self.pending:
             control.check()
@@ -69,7 +69,12 @@ class CheckoutUpdates:
                 raise UserAction(f'官网购买页面已关闭，未继续提交{label}')
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise UserAction(f'官网仍在保存{label}，当前购物袋保留；请求完成后可继续检查')
+                waiting_page = self.page
+                async def saved():
+                    control.check()
+                    return (self.page is waiting_page and not waiting_page.is_closed()
+                            and not self.pending and not self.failed)
+                raise PendingSave(f'官网仍在保存{label}，当前购物袋保留；保存成功后自动继续检查', saved)
             self.changed.clear()
             try:
                 await asyncio.wait_for(self.changed.wait(), min(.1, remaining))
