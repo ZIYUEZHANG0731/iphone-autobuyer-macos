@@ -23,7 +23,7 @@ from app.services.login import (account_page_url, apple_auth_url, shop_signin_ur
 from app.adapters.apple_login import AppleLogin
 from app.adapters.apple_consent import AppleConsent
 from app.adapters.controls import ensure_checked
-from app.adapters.checkout_state import checkout_state
+from app.adapters.checkout_state import checkout_state, review_state
 from app.adapters.checkout_updates import CheckoutUpdates
 from app.adapters.apple_pickup import ApplePickup, pickup_date
 from app.adapters.bag_state import bag_has_items
@@ -751,6 +751,11 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             await self._wait_checkout_entry()
         current_stage=(await checkout_state(self.page))['stage']
         fulfillment_ready=current_stage in ('pickup','pickup_unavailable','contact','payment')
+        if (fulfillment_ready and not self.guest_attempted and config.checkout_strategy!='guest'
+                and config.credential_id in getattr(self.sign_in,'attempted',())):
+            # Manual verification can complete while the engine is paused.
+            # Observe that normal return before a later expiry needs one login.
+            await self.auto_sign_in(self.page,config)
         if not fulfillment_ready and config.checkout_strategy!='guest' and config.auto_login:
             # Credentials take priority over the explicitly selected guest backup.
             # A rejected/uncertain attempt pauses with the bag intact.
@@ -941,15 +946,14 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             if str(exc).startswith('官网结账尚未完成加载'):
                 raise UserAction('官网订单核对页尚未完成加载；当前购物袋保留，不重复点击检查订单') from None
             raise
-        await self.guard()
+        snapshot=await review_state(self.page)
+        await self.guard(text=snapshot['text'])
         submit=self.page.get_by_role('button',name='立即下单',exact=True).filter(visible=True)
         if await submit.count()!=1 or not await submit.is_enabled():
             raise UserAction('官网下单按钮尚不可用；请在页面完成必要信息或验证，当前购物袋保留')
-        items=self.page.locator('li[data-autom^="bag-item-"]')
-        if await items.count()!=1:
+        if snapshot['item_count']!=1 or len(snapshot['titles'])!=1:
             raise UserAction('最终核对页商品数量无法可靠解析，请人工核对')
-        item=await items.inner_text()
-        title=await items.get_by_role('heading',level=2).inner_text()
+        item=snapshot['item'];title=snapshot['titles'][0]
         normalized=lambda s:re.sub(r'\s+','',s).lower()
         if normalized(config.product.name) not in normalized(title):
             raise FlowError('最终核对页商品与授权不一致')
@@ -957,16 +961,18 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             if normalized(label) not in normalized(title):
                 raise FlowError('最终核对页颜色或容量与授权不一致')
         q=re.search(r'数量\s*(\d+)',item)
-        total=await self.page.locator('[data-autom="bagtotalvalue"]').inner_text()
+        if len(snapshot['totals'])!=1:
+            raise UserAction('最终核对页总金额无法唯一确认，请人工核对')
+        total=snapshot['totals'][0]
         amount=re.fullmatch(r'\s*RMB\s*([\d,]+(?:\.\d+)?)\s*',total)
         if not q or int(q[1])!=config.product.quantity or not amount:
             raise FlowError('最终核对页数量或总金额无法确认')
         value=money(amount[1])
         await self.accept_price(config,value)
-        images=await self.page.get_by_role('img').filter(visible=True).evaluate_all('els=>els.map(e=>e.getAttribute("alt")||e.getAttribute("aria-label")||"")')
+        images=snapshot['images']
         if sum(payment_matches(self.payment,name) for name in images)!=1:
             raise UserAction('最终核对页付款方式无法确认，请人工核对')
-        body=await self.page.locator('body').inner_text()
+        body=snapshot['text']
         months=re.search(r'(\d+)\s*个月[，,]\s*每月约',body)
         actual_months=int(months[1]) if months else 0
         if actual_months!=payment_months(self.payment,config.installment_months):

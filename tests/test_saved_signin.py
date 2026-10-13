@@ -256,6 +256,38 @@ async def test_failed_authentication_does_not_retry_same_credentials(browser,out
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('guest',[False,True])
+async def test_manual_checkout_return_allows_one_later_login_but_guest_does_not_reset_attempt(browser,guest):
+    f=await fixture(browser,outcome='<p>无法验证你的身份。重试。</p>')
+    try:
+        with pytest.raises(UserAction,match='无法验证身份'):
+            await f.adapter.auto_sign_in(f.page)
+        contact='''<h1>取货联系信息</h1><label>姓氏<input></label><label>名字<input></label>
+          <label>电子邮件地址<input></label><label>联系人手机号码<input></label>
+          <label>政府颁发的身份证件号码的后四位<input></label><button>继续选择付款方式</button>'''
+        await f.context.route('**/shop/checkout?*',lambda route:route.fulfill(content_type='text/html; charset=utf-8',body=contact))
+        # Synthetic human verification has returned to the same checkout.
+        await f.page.goto('https://secure7.www.apple.com.cn/shop/checkout?_s=PickupContact-init')
+        f.adapter.guest_attempted=guest
+        with pytest.raises(UserAction,match='取货人'):
+            await f.adapter.fill_customer(None,f.config)
+        assert len(f.submissions)==1 and len(f.reads)==1
+        await f.page.goto(STORE_URL)
+        if guest:
+            with pytest.raises(UserAction,match='本次账户登录已尝试'):
+                await f.adapter.auto_sign_in(f.page)
+            assert len(f.submissions)==1 and len(f.reads)==1
+        else:
+            async def success(route):
+                f.submissions.append(json.loads(route.request.post_data))
+                await route.fulfill(content_type='text/html; charset=utf-8',body='success')
+            await f.context.route('**/fixture-submit',success)
+            assert await f.adapter.auto_sign_in(f.page)
+            assert len(f.submissions)==2 and len(f.reads)==2
+    finally:await f.context.close()
+
+
+@pytest.mark.e2e
 async def test_verification_then_trust_uses_one_password_attempt_and_no_otp_automation(browser):
     f=await fixture(browser,outcome=OTP)
     try:

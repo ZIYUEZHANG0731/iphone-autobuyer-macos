@@ -272,6 +272,33 @@ async def test_unknown_or_changed_checkout_cannot_submit_even_when_authorized(ch
     assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
 
 
+@pytest.mark.parametrize('change',['amount','color','bank','duplicate_total'])
+async def test_submission_reads_current_review_again_after_the_previous_summary_was_valid(checkout,change):
+    f=checkout
+    await f.adapter.fill_customer(f.identity,f.config)
+    await f.adapter.select_payment(f.config)
+    (await f.adapter.review(f.config)).authorize(f.config)
+    if change=='amount':await f.page.locator('[data-autom="bagtotalvalue"]').evaluate("e=>e.textContent='RMB 6,999'")
+    elif change=='color':await f.page.locator('li[data-autom^="bag-item-"] h2').evaluate("e=>e.textContent='iPhone 17 256GB 白色'")
+    elif change=='bank':await f.page.get_by_role('img',name='招商银行').evaluate("e=>e.alt='支付宝'")
+    else:await f.page.locator('[data-autom="bagtotalvalue"]').evaluate('e=>e.after(e.cloneNode(true))')
+    with pytest.raises((UserAction,FlowError)):
+        await f.adapter.submit(f.config)
+    assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
+
+
+async def test_hidden_accessibility_content_does_not_become_an_extra_product_or_payment(checkout):
+    f=checkout
+    await f.adapter.fill_customer(f.identity,f.config)
+    await f.adapter.select_payment(f.config)
+    await f.page.evaluate('''()=>{window.reviewHTML=window.reviewHTML.replace('</li>',
+        '<h2 aria-hidden="true">iPhone 18 1TB</h2></li>')+
+        '<img alt="招商银行" aria-hidden="true" src="/bank.svg">'}''')
+    summary=await f.adapter.review(f.config)
+    summary.authorize(f.config)
+    assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
+
+
 async def test_returning_to_fulfillment_invalidates_the_old_confirmation(checkout):
     f=checkout
     await f.adapter.fill_customer(f.identity,f.config)
