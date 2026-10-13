@@ -32,6 +32,9 @@ def available_store(row,config):
         not config.pickup_from or when>=config.pickup_from) and (not config.pickup_to or when<=config.pickup_to)
 
 
+PICKUP_SLOT=re.compile(r'^\s*\d{1,2}[:：]\d{2}\s*[–—\-~至]\s*\d{1,2}[:：]\d{2}\s*$')
+
+
 class ApplePickup:
     async def _set_missing_checkout_region(self,config):
         # A reused bag can enter fulfillment without the product modal's
@@ -70,6 +73,31 @@ class ApplePickup:
         except (AssertionError,PlaywrightError):
             await self.guard()
             raise UserAction('官网尚未确认取货地区，当前购物袋保留；请查看地区选择提示后继续') from None
+
+    async def _select_pickup_slot(self):
+        slots=self.page.get_by_role('combobox',name=re.compile(r'签到时段|取货.*时段|可选时段')).filter(visible=True)
+        count=await slots.count()
+        if not count:return None
+        if count!=1:raise UserAction('官网取货时段无法唯一确认，当前购物袋保留')
+        await expect(slots).to_be_enabled(timeout=8000)
+        state=await slots.evaluate('''select=>({tag:select.tagName,options:Array.from(select.options||[]).map(o=>({
+            value:o.value,label:o.label,selected:o.selected,
+            disabled:o.disabled||(o.parentElement.tagName==='OPTGROUP'&&o.parentElement.disabled)
+        }))})''')
+        if state['tag']!='SELECT':raise UserAction('官网取货时段控件尚不支持，当前购物袋保留')
+        available=[o for o in state['options'] if o['value'] and not o['disabled'] and PICKUP_SLOT.fullmatch(o['label'])]
+        if not available:raise UserAction('官网暂无可确认的取货时段，当前购物袋保留')
+        choice=next((o for o in available if o['selected']),available[0])
+        if not choice['selected']:
+            await slots.select_option(value=choice['value'])
+            # Read back after the DOM change so its normal network events are
+            # delivered before checking the pending checkout writes.
+            if await slots.input_value()!=choice['value']:
+                raise UserAction('官网未接受取货时段，当前购物袋保留')
+            await self.checkout_updates.ready(self.control,label='取货时段')
+        if await slots.input_value()!=choice['value']:
+            raise UserAction('官网未接受取货时段，当前购物袋保留')
+        return choice['label']
 
     def checkout_stores(self,snapshot,config):
         preferences=[self.store_directory.enrich(s) for s in config.stores if s.enabled]
@@ -138,6 +166,7 @@ class ApplePickup:
             try:
                 await self._check_radio(target)
                 await self.checkout_updates.ready(self.control)
+                slot=await self._select_pickup_slot()
                 await expect(continuation).to_be_enabled(timeout=8000)
             except UserAction:
                 await self.guard()
@@ -153,6 +182,7 @@ class ApplePickup:
             if not current or not current['checked']:
                 raise UserAction('官网未接受目标取货门店，当前购物袋保留')
             if not available_store(current,config):continue
+            if slot:self.progress('checkout_pickup',{'store':store.name,'message':'已选择官网可用取货时段 '+slot})
             old=self.selected.store
             self.selected=Availability(store,True,current['label'],pickup_date(current['label']))
             if old.store_id!=store.store_id:

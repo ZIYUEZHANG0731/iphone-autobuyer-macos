@@ -224,7 +224,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.official_time_button=self.button(c,'使用官网开售时间',self.use_official_time,'link');self.official_time_button.hide()
         self.interval=QDoubleSpinBox();self.interval.setRange(10,600);self.interval.setSuffix(' 秒');self.interval.setValue(10)
         self.wait=QSpinBox();self.wait.setRange(1,1440);self.wait.setSuffix(' 分钟');self.wait.setValue(30)
-        self.label(c,'官网入口每 5 秒尝试；加载与排队时保留页面。','muted')
+        self.entry_strategy=QComboBox();self.entry_strategy.setAccessibleName('开售入口策略')
+        self.entry_strategy.addItem('每 5 秒刷新入口','refresh');self.entry_strategy.addItem('停留等待放行','wait')
+        c.addWidget(self.entry_strategy)
+        self.entry_note=self.label(c,'未进入购买页时，每 5 秒刷新入口；加载中的请求继续等待。','muted')
+        self.entry_strategy.currentIndexChanged.connect(self.refresh_entry_note)
         self.schedule_note=self.label(c,'未预约时立即准备；官网试跑立即执行。','muted')
         self.metrics['countdown']=QLabel(self);self.metrics['countdown'].hide();c.addStretch()
         work.addWidget(left,5)
@@ -264,7 +268,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.diagnostics_dialog=QDialog(self);self.diagnostics_dialog.setWindowTitle('诊断工具');self.diagnostics_dialog.resize(450,180)
         diagnostic_layout=QVBoxLayout(self.diagnostics_dialog)
         f=QFormLayout();f.addRow('平时检查间隔',self.interval);f.addRow('最长等待',self.wait);diagnostic_layout.addLayout(f)
-        self.label(diagnostic_layout,'官网入口持续每 5 秒尝试；加载、排队和服务器指定等待时保留页面。','muted')
+        self.label(diagnostic_layout,'入口策略在控制台选择；加载中的请求与服务器指定等待仍保留。','muted')
         self.label(diagnostic_layout,'检查浏览器环境；本地异常测试使用合成数据。','muted')
         row=QHBoxLayout();self.button(row,'检查环境',lambda:self.launch_diagnostic('environment'));self.button(row,'安装浏览器',lambda:self.launch_diagnostic('install'));row.addStretch();diagnostic_layout.addLayout(row)
         row=QHBoxLayout();self.scenario=QComboBox()
@@ -273,6 +277,9 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
 
     def show_diagnostics(self):
         self.diagnostics_dialog.show();self.diagnostics_dialog.raise_()
+
+    def refresh_entry_note(self):
+        self.entry_note.setText('未进入购买页时，每 5 秒刷新入口；加载中的请求继续等待。' if self.entry_strategy.currentData()=='refresh' else '等待进店页面保持打开；普通维护或连接失败仍每 5 秒重试。')
 
     def launch_diagnostic(self,action):
         self.diagnostics_dialog.hide();self.launch(action)
@@ -318,6 +325,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.keep_awake.setChecked(self.config.keep_awake)
         self.checkout_strategy.setCurrentIndex(self.checkout_strategy.findData(self.config.checkout_strategy))
         self.browser_kind.setCurrentIndex(self.browser_kind.findData(self.config.browser_kind))
+        self.entry_strategy.setCurrentIndex(self.entry_strategy.findData(self.config.entry_strategy))
         self.payment_choices.populate(self.config.payments,self.config.installment_months);self.auto.setChecked(self.config.auto_submit);self.transmit.setChecked(self.config.transmit_identity);self.interval.setValue(max(10,self.config.interval));self.wait.setValue(int(self.config.max_wait/60))
         self.privacy_policy.setChecked(self.config.privacy_policy_accepted)
         self.privacy_transfer.setChecked(self.config.privacy_transfer_acknowledged)
@@ -339,6 +347,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             item=self.store_list.item(row);store=self.store_directory.enrich(item.data(Qt.ItemDataRole.UserRole));store.enabled=item.checkState()==Qt.CheckState.Checked;c.stores.append(store)
         c.payments=self.payment_choices.selected();c.installment_months=self.payment_choices.months;c.auto_submit=self.auto.isChecked();c.transmit_identity=self.transmit.isChecked();c.allow_other_stores=self.other.isChecked();c.no_stock=self.no_stock.currentData();c.pickup_from=self.pickup_from.text().strip();c.pickup_to=self.pickup_to.text().strip();c.interval=self.interval.value();c.max_interval=max(60,c.interval);c.max_wait=self.wait.value()*60;c.scenario=self.scenario.currentData();c.display_timezone=self.current_zone()
         c.keep_awake=self.keep_awake.isChecked()
+        c.entry_strategy=self.entry_strategy.currentData()
         c.checkout_strategy=self.checkout_strategy.currentData();c.browser_kind=self.browser_kind.currentData()
         c.privacy_policy_accepted=self.privacy_policy.isChecked();c.privacy_transfer_acknowledged=self.privacy_transfer.isChecked()
         c.privacy_notice_version=NOTICE_VERSION if c.privacy_policy_accepted or c.privacy_transfer_acknowledged else ''
@@ -473,7 +482,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             self.message_label.setText(f'官网访问限制仍需等待 {math.ceil(self.cooldown_until-time.monotonic())} 秒，再检查；现有会话保留。');return
         try:
             if action in ('environment','install','login','login_check','login_diagnosis','catalog'):
-                config=deepcopy(self.config);config.keep_awake=self.keep_awake.isChecked();config.browser_kind=self.browser_kind.currentData();config.checkout_strategy=self.checkout_strategy.currentData()
+                config=deepcopy(self.config);config.keep_awake=self.keep_awake.isChecked();config.browser_kind=self.browser_kind.currentData();config.checkout_strategy=self.checkout_strategy.currentData();config.entry_strategy=self.entry_strategy.currentData()
                 self.config=config;self.repo.save_config(config)
             else:
                 config=self.collect()
@@ -501,6 +510,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             self.worker.start()
         self.stop_button.setEnabled(True);self.close_session_button.setEnabled(True);self.resume_button.setEnabled(False);self.start_website.setEnabled(False);self.start_live.setEnabled(False)
         self.browser_kind.setEnabled(False)
+        self.entry_strategy.setEnabled(False)
         self.last_state='PREPARING'
         labels={'website':'官网试跑 · 到核对页停止','live':'真实购买','environment':'环境检查','install':'浏览器安装',
                 'login':'预登录','login_check':'登录复核','login_diagnosis':'登录问题诊断','catalog':'商品目录','options':'商品选项',
@@ -596,6 +606,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         elif kind=='preorder_preparation':self.console_log.appendPlainText('官网提前准备入口：'+('、'.join(data['visible_entries']) if data['visible_entries'] else '当前商品页未显示；按开售时间等待购买流程开放'))
         elif kind=='session':
             self.browser_kind.setEnabled(True)
+            self.entry_strategy.setEnabled(True)
             self.session_open=True;self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.resume_button.setEnabled(False);self.stop_button.setEnabled(False);self.close_session_button.setEnabled(True)
             self.banner.setText('官网浏览器会话保持打开');self.console_log.appendPlainText(data['message'])
         elif kind=='payment_qr':
@@ -670,6 +681,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
     def on_finished(self):
         self.clear_consent()
         self.browser_kind.setEnabled(True)
+        self.entry_strategy.setEnabled(True)
         self.browser_session_note.setText('浏览器会话已关闭；下一次诊断使用所选浏览器。')
         self.session_open=False;self.login_observation=None;self.close_session_button.setEnabled(False)
         self.login_label.setText('浏览器会话已关闭；重新打开后检查登录')

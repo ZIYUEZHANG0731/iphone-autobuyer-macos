@@ -59,3 +59,27 @@ CHECKOUT_STATE_SCRIPT = r'''({wait, wanted}) => {
 
 async def checkout_state(page, *, wait=0, wanted=()):
     return await page.evaluate(CHECKOUT_STATE_SCRIPT, {'wait': wait, 'wanted': list(wanted)})
+
+
+REVIEW_STATE_SCRIPT = r'''() => {
+  const visible = e => !!e.getClientRects().length &&
+    !['hidden','collapse'].includes(getComputedStyle(e).visibility) &&
+    !e.closest('[aria-hidden="true"],[hidden]');
+  const items = Array.from(document.querySelectorAll('li[data-autom^="bag-item-"]'));
+  const item = items.length===1 ? items[0] : null;
+  const headings = Array.from(item?.querySelectorAll('h2,[role="heading"][aria-level="2"]') || [])
+    .filter(e => visible(e) && (!e.getAttribute('role') || e.getAttribute('role')==='heading') &&
+      (!e.getAttribute('aria-level') || e.getAttribute('aria-level')==='2'));
+  const totals = Array.from(document.querySelectorAll('[data-autom="bagtotalvalue"]'));
+  const images = Array.from(document.querySelectorAll('img,[role="img"]'))
+    .filter(e => visible(e) && (!e.getAttribute('role') || e.getAttribute('role')==='img'));
+  return {item_count:items.length, item:item?.innerText || '',
+    titles:headings.map(e => e.innerText || ''), totals:totals.map(e => e.innerText || ''),
+    images:images.map(e => e.getAttribute('alt') || e.getAttribute('aria-label') || ''),
+    text:document.body?.innerText || ''};
+}'''
+
+
+async def review_state(page):
+    # A single current DOM read; contact text remains in memory, never logged.
+    return await page.evaluate(REVIEW_STATE_SCRIPT)

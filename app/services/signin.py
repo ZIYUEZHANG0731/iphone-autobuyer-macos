@@ -176,7 +176,7 @@ class SignInController:
             self.authenticated(config.credential_id)
             return True
         if path.rstrip('/') == '/shop/checkout':
-            for name in ('同意并继续', '继续填写取货详情', '继续选择付款方式'):
+            for name in ('同意并继续', '继续填写取货详情', '继续选择付款方式', '检查订单', '立即下单'):
                 if await page.get_by_role('button', name=name, exact=True).is_visible():
                     self.authenticated(config.credential_id)
                     progress('auto_login', {'status': 'checkout_returned', 'message': '账户登录已返回官网结账，继续保留当前购物袋'})

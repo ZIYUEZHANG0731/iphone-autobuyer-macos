@@ -107,6 +107,7 @@ class Settings:
     trust_browser: bool = False
     browser_kind: str = 'embedded'
     keep_awake: bool = True
+    entry_strategy: str = 'refresh'
     allow_other_stores: bool = False
     no_stock: str = "wait"
     pickup_from: str = ""
@@ -177,6 +178,8 @@ class Settings:
             raise ConfigError('请选择有效的结账登录策略')
         if self.browser_kind not in ('embedded', 'chrome', 'daily_chrome'):
             raise ConfigError('请选择内置浏览器、独立 Chrome 或日常 Chrome')
+        if self.entry_strategy not in ('refresh','wait'):
+            raise ConfigError('请选择每 5 秒刷新入口或停留等待放行')
         for key in ("auto_submit", "transmit_identity", "privacy_policy_accepted", "privacy_transfer_acknowledged", "allow_other_stores", "keep_awake", "auto_login", "trust_browser"):
             if type(getattr(self, key)) is not bool:
                 raise ConfigError("开关配置格式不正确")

@@ -368,6 +368,29 @@ def test_upgrade_keeps_existing_chrome_login_and_guest_strategy_is_click_selecta
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
+def test_launch_entry_preference_defaults_to_refresh_and_reopens(qt,tmp_path):
+    from app.models.config import Settings,ConfigError
+    old=Settings().to_dict();old.pop('entry_strategy')
+    assert Settings.from_dict(old).entry_strategy=='refresh'
+    with pytest.raises(ConfigError,match='刷新入口'):
+        Settings.from_dict({**old,'entry_strategy':'unknown'})
+    window=MainWindow(tmp_path)
+    try:
+        assert window.entry_strategy.currentData()=='refresh'
+        assert not window.entry_strategy.isEditable()
+        assert '每 5 秒刷新' in window.entry_note.text()
+        window.entry_strategy.setCurrentIndex(window.entry_strategy.findData('wait'))
+        assert '保持打开' in window.entry_note.text()
+        window.save()
+        assert window.repo.load_config().entry_strategy=='wait'
+    finally:window.close();window.deleteLater();qt.processEvents()
+    reopened=MainWindow(tmp_path)
+    try:
+        assert reopened.entry_strategy.currentData()=='wait'
+        assert reopened.collect().entry_strategy=='wait'
+    finally:reopened.close();reopened.deleteLater();qt.processEvents()
+
+
 def test_window_close_keeps_an_open_browser_worker_alive(qt,tmp_path,monkeypatch):
     from PySide6.QtGui import QCloseEvent
     window=MainWindow(tmp_path);control=Control(False)

@@ -110,6 +110,14 @@ class BrowserControls:
 
     def connect_daily_chrome(self):
         if self.worker and self.worker.isRunning():
+            current=getattr(self.worker,'session_kind','') or getattr(getattr(self.worker,'config',None),'browser_kind','')
+            if current=='daily_chrome':
+                if getattr(self.worker,'session_open',False):
+                    self.focus_browser()
+                    self.message_label.setText('日常 Chrome 已连接，继续使用当前 Apple 页面；无需重新接入。')
+                else:
+                    self.message_label.setText('正在接入日常 Chrome，请完成当前扩展连接；不会重复打开授权页。')
+                return
             if not self.worker.idle:
                 self.message_label.setText('请先停止当前任务，再接入日常 Chrome。');return
             if getattr(self.worker,'session_kind','')!='daily_chrome':

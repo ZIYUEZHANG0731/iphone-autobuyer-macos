@@ -1,4 +1,4 @@
-# Windows 第二阶段验收（v0.7.8 / build 51）
+# Windows 第二阶段验收（v0.7.9 / build 52）
 
 日期：2026-10-13。代码基线 `1472e79`，在 `codex/windows-port` 继续；macOS `main` 未改变。第一阶段结果保留在 [Windows 交接](WINDOWS_HANDOFF.md)，本页记录实际 Windows 证据。
 
@@ -115,6 +115,22 @@ IDMS 第一阶段的密码框祖先 `aria-hidden="true"`、高度为 0，但密�
 干净搜索路径 PyInstaller 构建成功；最终冻结环境、GUI、内置 renderer 和合成单次订单自检全部通过。证据 `reports/windows-build49.log`、`windows-self-test49.log`、`windows-package49.log`，合成隔离目录 `AutoBuyer packaged 93347d19-2a2a-4c45-8ec0-c63f541e9766`。最终包 **`dist/build49/iPhone AutoBuyer Windows v0.7.6.zip`**，263,978,343 字节；SHA256 **`5a357d0a79be7196cfede9d8be6fff131d1aaee769ea2c42a8d65061d419dc61`**。没有重复新电脑或全新用户验收。
 
 真正的登录结果仍未通过：16:38 的正常 Chrome 点击链和 17:00 的单一新登录页链，均为初始化 200 / JSON、单次密码提交 503 / HTML。公开入口的请求语言、认证语言参数和时钟均已核实。没有继续循环重发密码，没有创建真实订单。日常 Chrome 控制接口不可用，真实成功认证对照尚未取得，详情见 [登录诊断](LOGIN_DIAGNOSIS.md)。
+
+## build 52：迁入 macOS main 的共享修复
+
+2026-10-13 按用户要求，重新获取远端 macOS `main`，合入 `9d9dada330e56225a5e09cefb41be70e4b877e82`。这包含 `1a65ecb` 的入口策略与可操作购买页判断、`12d7e19` 的取货时段及日常 Chrome 连接复用、`48d5f4a` 的 macOS 现场记录，以及 `9d9dada` 的核对页一次读取和人工验证返回后的登录恢复。
+
+重复接入会聚焦当前已连接的 Apple 页；等待连接时不创建第二个授权页。选择官网必选取货时段后等待正常保存；已有有效时段保留。正常账户验证返回结账后解除已完成的尝试记录，之后新过期允许一次登录；游客继续、密码错误、验证码或服务失败不重发。核对阶段与提交前各读取一次当前商品、数量、金额和付款，不用旧摘要提交。首次扩展连接仍由 Chrome 授予控制权限，Mac 的历史连接不会迁移到 Windows。
+
+合并保留 Windows 平台层、隐藏密码框识别、原生 Chrome 输入、信任跳转等待、完整购物袋与保存等待、缺失取货地区处理，以及 build 51 的商品页账户入口和 15 秒账户导航。新版为 **v0.7.9 / build 52**。Mac 的订单、二维码、Cookie、账号密文与机器密钥均未移入 Windows。
+
+迁移专项 **230 passed / 200.36 秒**，包括取货、核对、保存账户、连接复用、购物袋、Duo 入口策略和 GUI。证据 `reports/mac-migration52-targeted.xml` 与 `mac-migration52-targeted.log`。全量、分发及真实网页结果分别继续记录；不能以 Mac 已有订单或拦截请求的合成测试代替本机真实核对页。
+
+最终 Windows 完整源码回归 **601 passed / 3 macOS skipped / 365.24 秒**，证据 `reports/windows-source52.xml` 和 `windows-source52.log`。源码编译及合并差异格式检查通过。
+
+干净 DLL 搜索路径构建、冻结环境、GUI、内置 renderer 与合成单次订单分发自检均退出 0。合成隔离目录为 `AutoBuyer packaged 72cce816-f6c9-45ab-8627-b3f3fe0fa7b5`；证据 `reports/windows-build52.log` 和 `windows-package52.json`。完整 ZIP **`dist/build52/iPhone AutoBuyer Windows v0.7.9.zip`** 为 **263,986,356 字节**、**3,714 个唯一条目**，CRC 通过，未包含用户资料。SHA256：**`9524372e7e52fd03d2cc3240df2df2ed0d8a16240e279aa7365be4223c265355`**。
+
+本机 build 51 正常退出，实际打开的 build 52 显示 v0.7.9，新增入口策略默认为刷新。原 iPhone 17 紫色 / 256GB / 1 件、允许门店顺序、支付宝 / 微信和只用账户策略保留。经软件加密移交后，两类资料均恢复为新程序的「仅本次使用」；实读持久私有记录 **0**，配置两种引用为空，真实提交记录 **0**。没有重复新电脑或新用户验收。旧版扩展控制连接此前已超时，新的真实流程需从新连接单独核验。
 
 ## build 51：商品页账户入口及慢速复核
 

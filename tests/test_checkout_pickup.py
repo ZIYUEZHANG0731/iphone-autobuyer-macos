@@ -192,6 +192,62 @@ async def test_matching_store_name_with_a_different_store_number_does_not_contin
     assert await page.evaluate('window.pickupClicks')==0
 
 
+def pickup_with_slots(*,selected='',available=True,saving=False):
+    options='<option value="" disabled '+('selected' if not selected else '')+'>可选时段</option>'
+    options+='<option value="full" disabled>09:45 – 10:00</option>'
+    options+='<optgroup disabled><option value="closed">10:00 – 10:15</option></optgroup>'
+    for value,label in [('morning','10:15 – 10:30'),('afternoon','14:00 – 14:15')]:
+        options+=f'<option value="{value}" {"selected" if selected==value else ""} {"disabled" if not available else ""}>{label}</option>'
+    change='''window.slotChanges++;window.busy=true;
+      fetch('/shop/checkout/fulfillment',{method:'POST',body:'synthetic-slot-update'})
+        .then(r=>r.json()).catch(()=>{}).finally(()=>window.busy=false)''' if saving else 'window.slotChanges++'
+    slot=f'<label>接下来，选择 周三, 10月14 当天的签到时段：<select id="slot" required onchange="{change}">{options}</select></label>'
+    page=pickup_html().replace('<button id="next"',slot+'<button id="next"')
+    page=page.replace('window.pickupClicks++;',"if(!document.getElementById('slot').reportValidity())return;if(window.busy){window.ignored++;return;}window.chosenSlot=document.getElementById('slot').value;window.pickupClicks++;")
+    return page+'<script>window.slotChanges=0;window.busy=false;window.ignored=0;</script>'
+
+
+@pytest.mark.parametrize('selected,expected,changes',[('','morning',1),('afternoon','afternoon',0)])
+async def test_required_pickup_slot_is_chosen_before_continuing_and_valid_selection_is_preserved(checkout_page,selected,expected,changes):
+    page=checkout_page;await page.set_content(pickup_with_slots(selected=selected))
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+    assert await page.evaluate('window.chosenSlot')==expected
+    assert await page.evaluate('window.slotChanges')==changes
+    assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+    assert not adapter.add_attempted
+
+
+async def test_no_pickup_slots_preserves_checkout_without_consuming_the_continue_attempt(checkout_page):
+    page=checkout_page;await page.set_content(pickup_with_slots(available=False))
+    adapter=adapter_for(page)
+    with pytest.raises(UserAction,match='暂无可确认的取货时段'):
+        await adapter.fill_customer(contact(),settings())
+    assert await page.evaluate('window.pickupClicks')==0
+    assert not adapter.pickup_continue_attempted and not adapter.checkout_last_continued
+    assert not adapter.add_attempted and adapter.checkout_pickup_confirmed is None
+
+
+@pytest.mark.parametrize('saved',[True,False])
+async def test_pickup_slot_save_finishes_before_continue_and_a_failed_save_preserves_checkout(checkout_page,saved):
+    page=checkout_page
+    async def update(route):
+        await asyncio.sleep(.3)
+        await route.fulfill(status=200 if saved else 500,content_type='application/json',body='{}')
+    await page.route('**/shop/checkout/fulfillment',update)
+    await page.set_content(pickup_with_slots(saving=True))
+    adapter=adapter_for(page)
+    if saved:
+        await asyncio.wait_for(adapter.fill_customer(contact(),settings()),3)
+        assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+    else:
+        with pytest.raises(UserAction,match='取货时段的保存'):
+            await adapter.fill_customer(contact(),settings())
+        assert await page.evaluate('window.pickupClicks')==0
+        assert not adapter.pickup_continue_attempted and not adapter.checkout_last_continued
+    assert await page.evaluate('window.ignored')==0
+
+
 def saving_pickup_html():
     return '''<main><h1>选择取货零售店</h1>
       <label><input type="radio" name="store" value="R359" onchange="window.busy=true;
