@@ -4,6 +4,15 @@
 
 ## 环境与可运行产物
 
+### v0.7.6 / build 44 Windows 第一阶段（macOS 开发验证）
+
+- 分支 `codex/windows-port`，适配提交 **`f1104f905c754a05a56fbb20850958ef611dae1a`**；以 `05ba1efee6c0b5b21d9ec226c02abd63260c1844` 的 v0.7.5 / build 43 为回退基线。独立工作树开发，`main` 和已安装 Mac v0.7.5 / build 43 保留；本轮隔离回归前后核对的正式配置、密文、密钥及安装应用 metadata 快照一致。
+- Windows 数据/路径、原生 DACL、Chrome 注册表查找及归属核对、UTF-8、时区数据、托盘入口和逻辑屏幕尺寸处理已加入。Qt 初始化、电源 API/生命周期及私有权限均集中在平台层，旧导入保留兼容；加密资料、付款码和诊断的原子写入合并。购买引擎、付款规则、隐私选项、登录语言/域名、慢跳转与刷新策略、订单锁继续共用现有实现；公开型号/SKU/价格和门店 JSON 未改变。
+- 最终完整离线回归 **524 passed / 0 failed / 1 skipped / 296.19 秒**，macOS 15.7.1 arm64、Python 3.13.3、独立虚拟环境。唯一跳过是原生 Windows DACL 测试；macOS 的 Windows 分支夹具只证明控制逻辑。资料/GUI 专项 **55 passed / 1 skipped / 7.76 秒**，最后平台归并后的专项 **26 passed / 1 skipped / 4.72 秒**，之后再次全量回归通过。初次专项 2 项夹具失败、初次全量 1 项漏导入失败均已修正，详见交接。
+- 源码 GUI / 内置 renderer 自检均退出 0、JSON ok=true，输出 **GUI_SMOKE_OK / EMBEDDED_SMOKE_OK**；实际截图发现窄逻辑屏幕下摘要单字竖排，已修复尺寸约束并复看。源码 CLI 的 first_available 合成场景为 PAYMENT_PENDING、合成订单 1 个、提交 1 次；没有真实 Apple 请求/订单/付款。pip check、compileall、spec 语法和 diff 检查通过。
+- Windows 3.13 x64 wheel 已解析并下载，核对 Qt WebEngine helper/locales/V8、Playwright Node 驱动、cryptography Rust pyd 和 tzdata。macOS 可移植 PowerShell 7.5.3 的 7 个 ps1 AST 全部零错误，参数/JSON 助手及非 Windows 拒绝退出逻辑检查通过；**这些不等于 Windows 原生运行或 Windows PowerShell 5.1 验收**。
+- 没有生成或安装 Windows 产物，也未重新构建/安装 Mac 应用。本机忽略的证据为 `reports/windows-stage1-final-pytest.txt`、`windows-stage1-final-tests.xml`、`windows-stage1-platform-final.txt`、`windows-stage1-targeted-final.txt`、`windows-stage1-gui.*`、`windows-stage1-embedded.*`、`windows-stage1-cli.*`、`windows-stage1-powershell*.txt`、`windows-stage1-wheels.txt`。源码及分发入口、精确命令和全部待验项见 [Windows 准备](WINDOWS_PREPARATION.md) 与 [Windows 交接](WINDOWS_HANDOFF.md)。Windows API、Chrome/内置会话恢复、托盘/DPI、电源、完整分发目录和真实官网流程均待 Windows 11 x64 分别验收；真实订单/付款须另行明确安排。
+
 ### v0.7.5 / build 42–43 付款方案与结账观察
 
 - 原自动提交限定招商银行 24 期，且全局期数会套到支付宝和微信等普通备用付款。本版共享付款名称、别名、有效期数和显示文本：普通支付宝、微信支付与花呗分期、微信分付分别选择；普通付款使用 0 期，银行和分期方案使用所选期数。GUI、准备清单、最终摘要和授权保持一致。当前页面没有提供、选项禁用、期数歧义或最终方式/期数变化均不会提交。
