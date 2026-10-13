@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from app.models.config import State, Store, Settings, money
+from app.services.payment_methods import payment_months
 
 class FlowError(Exception):
     """Only fixed, public error messages; do not wrap Playwright messages with PII."""
@@ -61,7 +62,7 @@ class Summary:
             raise FlowError("订单门店未获授权")
         if self.payment not in config.payments:
             raise FlowError("订单付款方式未获授权")
-        if self.installment_months != config.installment_months:
+        if self.installment_months != payment_months(self.payment,config.installment_months):
             raise FlowError('订单分期期数与授权不一致')
 
 @dataclass

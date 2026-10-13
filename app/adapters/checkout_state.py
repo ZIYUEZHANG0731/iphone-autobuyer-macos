@@ -28,6 +28,7 @@ CHECKOUT_STATE_SCRIPT = r'''({wait, wanted}) => {
       (contactFields.includes('电子邮件地址') || contactFields.includes('联系人手机号码'));
     let stage = 'loading';
     if (buttons.includes('同意并继续')) stage = 'consent';
+    else if (buttons.includes('立即下单')) stage = 'review';
     else if (headings.some(h => /你希望如何付款/.test(h))) stage = 'payment';
     else if (contact || buttons.some(b => /^继续选择付款方式(?:\s|$)/.test(b))) stage = 'contact';
     else if (buttons.includes('以游客身份继续')) stage = 'guest';

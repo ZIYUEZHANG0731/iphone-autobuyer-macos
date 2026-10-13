@@ -60,18 +60,23 @@ RECEIPT = '''<main><h1>你的订单正在等待付款，请使用“掌上生活
 <p>请使用“掌上生活” App 扫码支付</p><a href="/order/fixture">订单 #W1234567890</a></main>'''
 
 @pytest.mark.e2e
-async def test_extracts_only_rendered_qr_from_offline_official_dom_fixture(browser,tmp_path):
+@pytest.mark.parametrize(('method','months','app'),[
+    ('招商银行',24,'掌上生活'),('支付宝',0,'支付宝'),('微信支付',0,'微信'),
+    ('花呗分期',6,'支付宝'),('微信分付',3,'微信'),
+])
+async def test_extracts_only_rendered_qr_from_offline_official_dom_fixture(browser,tmp_path,method,months,app):
     context=await browser.new_context();page=await context.new_page()
-    await page.route('**/*',lambda route:route.fulfill(body=RECEIPT,content_type='text/html; charset=utf-8'))
+    body=RECEIPT if method=='招商银行' else RECEIPT.replace('，请使用“掌上生活” App 扫描二维码支付。','').replace('CMB 二维码',method+' 二维码').replace('<p>请使用“掌上生活” App 扫码支付</p>','')
+    await page.route('**/*',lambda route:route.fulfill(body=body,content_type='text/html; charset=utf-8'))
     await page.goto('https://www.apple.com.cn/shop/checkout/thankyou')
     adapter=AppleAdapter(page,Control(False));store=PaymentStore(tmp_path)
     try:
-        handoff=await adapter.extract_payment_qr(store,review={'product':'离线控件测试商品','total':'6799','payment':'招商银行','installment_months':24})
+        handoff=await adapter.extract_payment_qr(store,review={'product':'离线控件测试商品','total':'6799','payment':method,'installment_months':months})
         image=store.image_path(handoff).read_bytes()
         # Subpixel DOM coordinates may add one pixel when Chromium clips the image.
         assert all(238<=side<=239 for side in struct.unpack('>II',image[16:24]))
-        assert handoff.order_id=='W1234567890' and handoff.payment_app=='掌上生活'
-        assert handoff.installment_months==24 and handoff.payment_window_minutes==30
+        assert handoff.order_id=='W1234567890' and handoff.payment_app==app
+        assert handoff.payment==method and handoff.installment_months==months and handoff.payment_window_minutes==30
         assert handoff.payment_deadline is None
         assert 'PRIVATE-CONTACT' not in (store.directory/'latest.json').read_text()
     finally:await context.close()
@@ -163,6 +168,33 @@ async def test_offline_submit_uses_one_click_and_reads_real_dom_contract(browser
         assert receipt.payment_deadline is not None
         with pytest.raises(SubmissionUnknown):await adapter.submit(cfg)
         assert transitions==['synthetic-confirmation']
+    finally:await context.close()
+
+
+@pytest.mark.parametrize(('url','title','status'),[
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单正在等待付款','payment_pending'),
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单已收到','confirmed'),
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','感谢你的订单','confirmed'),
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','你的订单已取消',None),
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','订单正在处理，但创建失败',None),
+    ('https://secure7.www.apple.com.cn/shop/checkout/thankyou','正在加载',None),
+    ('https://wallet-provider.invalid/shop/checkout/thankyou','你的订单正在等待付款',None),
+    ('https://apple.com.cn.attacker.invalid/shop/checkout/thankyou','你的订单已收到',None),
+])
+async def test_receipt_requires_apple_confirmation_and_order_number(browser,url,title,status):
+    context=await browser.new_context();page=await context.new_page()
+    body='<h1>'+title+'</h1><a href="#fixture">订单 #W1234567890</a><p>请在 30 分钟内完成付款</p>'
+    await context.route('**/*',lambda route:route.fulfill(body=body,content_type='text/html; charset=utf-8'))
+    try:
+        await page.goto(url)
+        adapter=AppleAdapter(page,Control(False));adapter.submit_started=datetime.now(timezone.utc)
+        receipt=await adapter._current_receipt()
+        assert (receipt.status if receipt else None)==status
+        if receipt:
+            assert receipt.order_id=='W1234567890'
+            assert bool(receipt.payment_deadline)==(status=='payment_pending')
+        await page.get_by_role('link',name='订单 #W1234567890').evaluate('e=>e.remove()')
+        assert await adapter._current_receipt() is None
     finally:await context.close()
 
 

@@ -14,6 +14,7 @@ from app.models.config import Identity, Mode, Product, Settings, Store
 from app.models.flow import Availability, FlowError, UserAction
 from app.services.storage import Repository
 from app.platforms import installed_chrome
+from app.services.payment_methods import payment_months
 
 
 REVIEW='''<h1>准备下单了吗？</h1>
@@ -98,6 +99,17 @@ async def checkout(request,tmp_path):
             adapter.detach()
 
 
+async def run_checkout(f,repo,mode):
+    f.adapter.mode=mode
+    # Product/stock preparation is outside this checkout contract.
+    async def prepared(_):pass
+    async def open_store():return True
+    async def existing_bag(_):return True
+    f.adapter.prepare=prepared;f.adapter.select_product=prepared
+    f.adapter.is_open=open_store;f.adapter.resume_cart=existing_bag
+    return await Engine(repo,f.control).run(f.config,f.adapter,mode,f.identity)
+
+
 @pytest.mark.parametrize('checkout',['headless','standalone'],indirect=True)
 @pytest.mark.parametrize('mode',[Mode.LIVE,Mode.WEBSITE_DRY_RUN])
 @pytest.mark.parametrize('name_visible',[False,True])
@@ -105,15 +117,8 @@ async def test_confirmed_checkout_store_allows_automatic_review_and_one_authoriz
     f=checkout;f.adapter.mode=mode
     if name_visible:
         await f.page.evaluate("()=>window.reviewHTML=window.reviewHTML.replace('<h2>取货日期','<p>Apple 南京东路</p><h2>取货日期')")
-    # The fixture starts at checkout; product/stock preparation is outside this
-    # contract. Customer, payment, Review and submit use the actual adapter.
-    async def prepared(_):pass
-    async def open_store():return True
-    async def existing_bag(_):return True
-    f.adapter.prepare=prepared;f.adapter.select_product=prepared
-    f.adapter.is_open=open_store;f.adapter.resume_cart=existing_bag
     repo=Repository(tmp_path/'test.sqlite3')
-    result=await Engine(repo,f.control).run(f.config,f.adapter,mode,f.identity)
+    result=await run_checkout(f,repo,mode)
     assert result.state==('PAYMENT_PENDING' if mode==Mode.LIVE else 'COMPLETED'),result
     assert f.requests.count('fixture-order')==int(mode==Mode.LIVE)
     review=next(data for kind,data in f.events if kind=='review')
@@ -127,10 +132,114 @@ async def test_confirmed_checkout_store_allows_automatic_review_and_one_authoriz
         assert repo.submission(f.config.intent_id) is None
 
 
+async def configure_payment(f,method,months,*,label=None,fallback=False):
+    f.config.payments=(['招商银行',method] if fallback else [method])
+    f.config.installment_months=months
+    actual=payment_months(method,months)
+    label=label or method
+    payment='<h1>你希望如何付款？</h1>'
+    if fallback:payment+='<label><input type="radio" disabled>招商银行</label>'
+    payment+='<label><input type="radio" name="bank" value="'+('installments-fixture' if actual else 'wallet-fixture')+'" onchange="fetch(\'/shop/checkout/fixture-bank\',{method:\'POST\'})"><img alt="'+label+'"></label>'
+    if actual:
+        payment+='<label><input type="radio" name="term" onchange="fetch(\'/shop/checkout/fixture-term\',{method:\'POST\'})">'+str(actual)+' 期 0% 年化利率</label>'
+    payment+='<button onclick="fetch(\'/shop/checkout/fixture-review\',{method:\'POST\'}).then(()=>document.querySelector(\'main\').innerHTML=window.reviewHTML)">检查订单</button>'
+    review=REVIEW.replace('alt="招商银行"','alt="'+label+'"').replace('24 个月，每月约 RMB 284',str(actual)+' 个月，每月约 RMB 284' if actual else '')
+    await f.page.evaluate('data=>{window.paymentHTML=data.payment;window.reviewHTML=data.review}',{'payment':payment,'review':review})
+
+
+@pytest.mark.parametrize('mode',[Mode.LIVE,Mode.WEBSITE_DRY_RUN])
+@pytest.mark.parametrize(('method','months'),[
+    ('支付宝',24),('微信支付',24),('花呗分期',3),('微信分付',6),
+    ('招商银行',6),('中国建设银行',12),('中国工商银行',3),
+    ('Apple Pay',24),('信用卡',24),('电汇',24),
+])
+async def test_each_verified_payment_can_finish_without_the_cmb24_gate(checkout,tmp_path,mode,method,months):
+    f=checkout;await configure_payment(f,method,months)
+    repo=Repository(tmp_path/'multi-payment.sqlite3')
+    result=await run_checkout(f,repo,mode)
+    assert result.state==('PAYMENT_PENDING' if mode==Mode.LIVE else 'COMPLETED'),result
+    actual=payment_months(method,months)
+    review=next(data for kind,data in f.events if kind=='review')
+    assert review['payment']==method and review['installment_months']==actual
+    assert f.requests.count('fixture-term')==int(actual>0)
+    assert f.requests.count('fixture-order')==int(mode==Mode.LIVE)
+    if mode==Mode.LIVE:
+        recovered=await Engine(repo,f.control).run(f.config,f.adapter,mode,f.identity)
+        assert recovered.order_id==result.order_id and f.requests.count('fixture-order')==1
+    else:assert repo.submission(f.config.intent_id) is None
+
+
+@pytest.mark.parametrize('checkout',['standalone'],indirect=True)
+@pytest.mark.parametrize(('method','months','label'),[
+    ('支付宝',24,'Alipay'),('微信支付',24,'WeChat Pay'),
+    ('中国建设银行',6,'建设银行'),('花呗分期',12,'花呗分期'),
+])
+async def test_standalone_chrome_submits_wallets_and_other_terms_once(checkout,tmp_path,method,months,label):
+    f=checkout;await configure_payment(f,method,months,label=label)
+    result=await run_checkout(f,Repository(tmp_path/'chrome-payment.sqlite3'),Mode.LIVE)
+    assert result.state=='PAYMENT_PENDING',result
+    assert f.requests.count('fixture-order')==1
+
+
+@pytest.mark.parametrize('method',['支付宝','微信支付'])
+async def test_full_payment_backup_does_not_inherit_bank_installments(checkout,tmp_path,method):
+    f=checkout;await configure_payment(f,method,24,fallback=True)
+    result=await run_checkout(f,Repository(tmp_path/'backup.sqlite3'),Mode.LIVE)
+    assert result.state=='PAYMENT_PENDING' and f.adapter.installment_months==0,result
+    assert 'fixture-term' not in f.requests and f.requests.count('fixture-order')==1
+
+
+@pytest.mark.parametrize(('method','review_label','review_months'),[
+    ('支付宝','花呗分期',0),('微信支付','微信分付',0),
+    ('支付宝','支付宝',24),('微信支付','微信支付',6),
+    ('中国建设银行','中国工商银行',6),('中国建设银行','中国建设银行',12),
+])
+async def test_changed_wallet_or_bank_scheme_cannot_submit(checkout,method,review_label,review_months):
+    f=checkout;f.config.payments=[method];f.config.installment_months=6
+    await f.adapter.fill_customer(f.identity,f.config)
+    f.adapter.payment=method;f.adapter.installment_months=payment_months(method,6)
+    review=REVIEW.replace('alt="招商银行"','alt="'+review_label+'"').replace(
+        '24 个月，每月约 RMB 284',str(review_months)+' 个月，每月约 RMB 284' if review_months else '')
+    await f.page.set_content('<main>'+review+'</main>')
+    with pytest.raises((UserAction,FlowError)):await f.adapter.submit(f.config)
+    assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
+
+
+@pytest.mark.parametrize('terms',[
+    '<label><input type="radio">6 期 0% 年化利率</label>'*2,
+    '<label><input type="radio" disabled>6 期 0% 年化利率</label>',
+])
+async def test_ambiguous_or_disabled_installment_is_not_selected(checkout,terms):
+    f=checkout;f.config.payments=['花呗分期'];f.config.installment_months=6
+    await f.page.set_content('<main><h1>你希望如何付款？</h1><label><input type="radio" value="installments-fixture">花呗分期</label>'+terms+'</main>')
+    with pytest.raises(UserAction):await f.adapter.select_payment(f.config)
+    assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
+
+
+async def test_slow_review_can_resume_without_clicking_the_transition_twice(checkout):
+    f=checkout
+    await f.adapter.fill_customer(f.identity,f.config)
+    await f.adapter.select_payment(f.config)
+    await f.page.get_by_role('button',name='检查订单').evaluate('button=>button.onclick=()=>{window.reviewClicks=(window.reviewClicks||0)+1;document.querySelector("h1").textContent="正在加载";setTimeout(()=>document.querySelector("main").innerHTML=window.reviewHTML,900)}')
+    observe=f.adapter._wait_checkout_stage;budgets=[]
+    async def bounded_observation(**kwargs):
+        budgets.append(kwargs['timeout'])
+        return await observe(**{**kwargs,'timeout':.05 if len(budgets)==1 else 2})
+    f.adapter._wait_checkout_stage=bounded_observation
+    with pytest.raises(UserAction,match='不重复点击检查订单'):
+        await f.adapter.review(f.config)
+    # The old Billing button remains visible during the delayed transition.
+    assert await f.page.get_by_role('button',name='检查订单').is_visible()
+    summary=await f.adapter.review(f.config)
+    summary.authorize(f.config)
+    assert min(budgets)>=45 and await f.page.evaluate('window.reviewClicks')==1
+    assert not f.adapter.submit_attempted and 'fixture-order' not in f.requests
+
+
 @pytest.mark.parametrize('change',[
     'stock_quote_only','continuation_only','changed_selection','changed_page','left_checkout',
     'shipping','different_visible_store','different_product','different_color',
-    'different_amount','different_bank','different_term','date_range',
+    'different_amount','different_bank','different_term','disabled_submit','date_range',
 ])
 async def test_unknown_or_changed_checkout_cannot_submit_even_when_authorized(checkout,change):
     f=checkout
@@ -155,6 +264,7 @@ async def test_unknown_or_changed_checkout_cannot_submit_even_when_authorized(ch
     elif change=='different_amount':html=html.replace('RMB 6,799','RMB 6,999')
     elif change=='different_bank':html=html.replace('alt="招商银行"','alt="支付宝"')
     elif change=='different_term':html=html.replace('24 个月','12 个月')
+    elif change=='disabled_submit':html=html.replace('<button onclick=','<button disabled onclick=')
     elif change=='date_range':f.config.pickup_from='2099-01-01'
     await f.adapter.page.set_content('<main>'+html+'</main>')
     with pytest.raises((UserAction,FlowError)):

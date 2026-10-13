@@ -13,7 +13,10 @@ import pytest
 
 
 @pytest.mark.e2e
-def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly(tmp_path):
+@pytest.mark.parametrize(('method','months'),[
+    ('招商银行',24),('支付宝',24),('微信支付',24),('中国建设银行',6),
+])
+def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly(tmp_path,method,months):
     script=textwrap.dedent('''
         import asyncio
         import sys
@@ -28,6 +31,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         from app.models.config import Settings, Store, Identity, Mode
         from app.models.flow import Availability
         from app.models.credential import AppleCredential
+        from app.services.payment_methods import payment_months
         from app.services.consent import NOTICE_TITLE, NOTICE_INTRO, NOTICE_CHOICES, NOTICE_MORE, NOTICE_VERSION
         from app.gui.window import MainWindow
         from app.utils.qt import prepare_plugins, single_shot
@@ -41,6 +45,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
         assert not window.embedded_browser.profile.isOffTheRecord()
         window.stack.setCurrentIndex(6)
         phase=sys.argv[2]
+        method=sys.argv[3];months=int(sys.argv[4]);actual_months=payment_months(method,months)
 
         class Probe(QThread):
             data=Signal(str,object)
@@ -114,15 +119,17 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                         await route.fulfill(content_type='text/html; charset=utf-8',body="""<h1>你的订单正在等待付款</h1>
                           <p>请在 30 分钟内完成付款</p><a href="#fixture">订单 #W1234567890</a>""")
                     await session.context.route('**/shop/checkout/thankyou',receipt_fixture)
-                    await session.page.set_content("""<main><h1>准备下单了吗？</h1>
+                    review="""<main><h1>准备下单了吗？</h1>
                       <h2>取货日期待付款完成后确定。</h2><a href="#pickup">更改零售店</a>
                       <li data-autom="bag-item-fixture"><h2>iPhone 17</h2><p>数量 1</p></li>
                       <p data-autom="bagtotalvalue">RMB 6,799</p><img alt="招商银行">
                       <p>24 个月，每月约 RMB 284</p>
-                      <button onclick="location.href='/shop/checkout/thankyou'">立即下单</button></main>""")
+                      <button onclick="location.href='/shop/checkout/thankyou'">立即下单</button></main>"""
+                    review=review.replace('alt="招商银行"','alt="'+method+'"').replace('24 个月，每月约 RMB 284',str(actual_months)+' 个月，每月约 RMB 284' if actual_months else '')
+                    await session.page.set_content(review)
                     config.product.name='iPhone 17';config.product.max_total='6799'
-                    config.auto_submit=True;config.payments=['招商银行'];config.installment_months=24
-                    adapter.mode=Mode.LIVE;adapter.payment='招商银行';adapter.installment_months=24
+                    config.auto_submit=True;config.payments=[method];config.installment_months=months
+                    adapter.mode=Mode.LIVE;adapter.payment=method;adapter.installment_months=actual_months
                     self.browser_hidden.clear();self.hide_browser.emit()
                     assert await asyncio.to_thread(self.browser_hidden.wait,3)
                     receipt=await adapter.submit(config)
@@ -187,7 +194,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
     ''')
     env={**os.environ,'QT_QPA_PLATFORM':'offscreen','AUTOBUYER_DATA_DIR':str(tmp_path)}
     for phase in ('save','reopen'):
-        result=subprocess.run([sys.executable,'-c',script,str(tmp_path),phase],
+        result=subprocess.run([sys.executable,'-c',script,str(tmp_path),phase,method,str(months)],
                               cwd=Path(__file__).resolve().parents[1],env=env,
                               text=True,capture_output=True,timeout=45)
         assert result.returncode==0,result.stdout+'\n'+result.stderr

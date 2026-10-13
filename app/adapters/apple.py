@@ -13,6 +13,7 @@ from app.models.config import Store, Mode, apple_url, money
 from app.models.flow import FlowError, UserAction, RateLimited, Availability, Summary, Receipt, SubmissionUnknown
 from app.automation.control import Control
 from app.services.payment import PaymentStore
+from app.services.payment_methods import payment_matches, payment_months, payment_app
 from app.services.pricing import quote_key
 from app.services.catalog import exact_product_link,preorder_time
 from app.services.catalog_reader import public_links
@@ -47,11 +48,10 @@ CONTROL_SCRIPT = '''() => {
 }'''
 
 class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
-    # A real CMB/24-month order and thank-you page were observed on 2026-10-11.
-    # Automatic submission still requires a fully verified review, including store.
+    # The selected, saved payment is verified again at Review before submission.
     @property
     def supports_submit(self):
-        return self.payment=='招商银行' and self.installment_months==24
+        return bool(self.payment)
     def __init__(self, page: Page, control: Control, *, mode=Mode.WEBSITE_DRY_RUN, progress=None, public_screenshot: Path|None=None, page_factory=None, page_closer=None, login_config=None, credential_provider=None, sign_in=None, page_focus=None):
         self.page = page
         self.control = control
@@ -78,6 +78,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.target_url = ''
         self.delivery_preview_failed = False
         self.submit_attempted = False
+        self.review_advance_attempted = False
         self.submit_started = None
         self.waiting_for_link=False
         self.busy_until=0.;self.in_queue=False;self.navigation_pending=False;self.navigation_started=0.
@@ -105,6 +106,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         self.dom_ready=True
         if not urlsplit(self.page.url).path.startswith('/shop/checkout'):
             self.checkout_pickup_confirmed=None
+            self.review_advance_attempted=False
 
     def detach(self):
         self.checkout_updates.detach()
@@ -117,6 +119,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         if changed:
             self.auth_service_status=None
             self.checkout_pickup_confirmed=None
+            self.review_advance_attempted=False
         self.checkout_updates.attach(page)
         page.on('response',self._response);page.on('domcontentloaded',self._dom_loaded)
 
@@ -327,7 +330,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             raise UserAction('请先在官网完成单次下单，进入显示付款二维码的订单确认页')
         await self.guard()
         heading=self.page.get_by_role('heading',level=1)
-        if await heading.count()!=1 or '订单正在等待付款' not in await heading.inner_text():
+        if await heading.count()!=1 or not re.search(r'订单.*(?:等待付款|尚未付款|未付款|待付款)',await heading.inner_text()):
             raise UserAction('官网还没有显示待付款订单；不从加载页或其他页面提取付款码')
         order=self.page.get_by_role('link',name=re.compile(r'^订单\s*#[A-Z]\d{8,16}$'))
         if await order.count()!=1:
@@ -351,7 +354,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         return store.save(image,order_id=order_id,payment=payment,product=details.get('product',''),
             total_cny=details.get('total',''),installment_months=details.get('installment_months',0),
             payment_window_minutes=int(window[1]) if window else None,submitted_at=submitted_at,
-            payment_app=app[1].strip() if app else '')
+            payment_app=app[1].strip() if app else payment_app(payment))
 
     async def options(self):
         await self.guard()
@@ -757,7 +760,7 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         stage=await self._wait_checkout_stage()
         while stage in ('pickup','pickup_unavailable'):
             await self._select_checkout_pickup(config)
-            stage=await self._wait_checkout_stage(wanted=('contact','payment','pickup_unavailable'),timeout=15)
+            stage=await self._wait_checkout_stage(wanted=('contact','payment','pickup_unavailable'),timeout=max(45,config.operation_timeout))
         if stage in ('contact','payment') and self.checkout_last_continued:
             await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout))
             if self.selected and self.selected.store.store_id==self.checkout_last_continued:
@@ -869,25 +872,34 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         # Runtime discovery: unavailable payment methods are never assumed.
         await self.page.get_by_role('heading',name='你希望如何付款？',exact=True).wait_for()
         controls=await self.page.evaluate(CONTROL_SCRIPT)
-        choices=[c for c in controls if c['kind']=='radio' and c['visible'] and any(p==c['label'] for p in config.payments)]
+        choices=[c for c in controls if c['kind']=='radio' and c['visible'] and any(payment_matches(p,c['label']) for p in config.payments)]
         self.progress('payments',[c['label'] for c in choices])
         for preferred in config.payments:
-            candidates=[c for c in choices if preferred==c['label'] and not c['disabled']]
+            candidates=[c for c in choices if payment_matches(preferred,c['label']) and not c['disabled']]
             if len(candidates)==1:
-                await self._check_radio(self.page.get_by_role('radio',name=candidates[0]['label'],exact=True))
+                await self._check_radio(self.page.get_by_role('radio',name=candidates[0]['label'],exact=True).filter(visible=True))
                 self.payment=preferred
+                self.review_advance_attempted=False
                 selected=candidates[0]
                 await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout),label='付款方式')
-                if config.installment_months:
-                    # Only activate a term actually rendered for the selected bank.
-                    pattern=re.compile(r'^'+str(config.installment_months)+r'\s*期(?:\s|0)')
-                    term=self.page.get_by_role('radio',name=pattern)
+                months=payment_months(preferred,config.installment_months)
+                self.installment_months=0
+                if months:
+                    # Only activate a term rendered for the selected scheme.
+                    pattern=re.compile(r'^'+str(months)+r'\s*期(?:\s|0)')
+                    term=self.page.get_by_role('radio',name=pattern).filter(visible=True)
+                    if await term.count()>1:
+                        raise UserAction('当前分期期数无法唯一确认，请在官网核对后继续')
                     try:
                         await term.wait_for(timeout=10000)
                     except PlaywrightTimeout:
                         raise UserAction("当前付款方式没有要求的分期方案；请在官网核对后继续") from None
+                    if await term.count()!=1:
+                        raise UserAction('当前分期期数无法唯一确认，请在官网核对后继续')
+                    if not await term.is_enabled():
+                        raise UserAction('当前要求的分期期数不可用，请在官网核对后继续')
                     await self._check_radio(term)
-                    self.installment_months=config.installment_months
+                    self.installment_months=months
                     terms=await self.page.evaluate(CONTROL_SCRIPT)
                     self.progress('installments',[c['label'] for c in terms if c['kind']=='radio' and c['visible'] and re.match(r'^\d+\s*期',c['label'])])
                 elif str(selected['value']).startswith('installments'):
@@ -901,10 +913,21 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         await self.checkout_updates.ready(self.control,timeout=min(30,config.operation_timeout),label='付款方案')
         # “检查订单” was observed on the real Billing page; “立即下单” is never clicked.
         advance=self.page.get_by_role('button',name='检查订单',exact=True)
-        if await advance.is_visible():
+        if not self.review_advance_attempted and await advance.is_visible():
+            self.review_advance_attempted=True
             await advance.click()
-        await self.page.get_by_role('button',name='立即下单',exact=True).wait_for(timeout=15000)
+        try:
+            # Observe DOM readiness, without adding a fixed delay or replaying
+            # the transition when the website finishes after the old 15s cap.
+            await self._wait_checkout_stage(wanted=('review',),timeout=max(45,config.operation_timeout))
+        except UserAction as exc:
+            if str(exc).startswith('官网结账尚未完成加载'):
+                raise UserAction('官网订单核对页尚未完成加载；当前购物袋保留，不重复点击检查订单') from None
+            raise
         await self.guard()
+        submit=self.page.get_by_role('button',name='立即下单',exact=True).filter(visible=True)
+        if await submit.count()!=1 or not await submit.is_enabled():
+            raise UserAction('官网下单按钮尚不可用；请在页面完成必要信息或验证，当前购物袋保留')
         items=self.page.locator('li[data-autom^="bag-item-"]')
         if await items.count()!=1:
             raise UserAction('最终核对页商品数量无法可靠解析，请人工核对')
@@ -923,12 +946,13 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             raise FlowError('最终核对页数量或总金额无法确认')
         value=money(amount[1])
         await self.accept_price(config,value)
-        if await self.page.get_by_role('img',name=self.payment,exact=True).count()!=1:
+        images=await self.page.get_by_role('img').filter(visible=True).evaluate_all('els=>els.map(e=>e.getAttribute("alt")||e.getAttribute("aria-label")||"")')
+        if sum(payment_matches(self.payment,name) for name in images)!=1:
             raise UserAction('最终核对页付款方式无法确认，请人工核对')
         body=await self.page.locator('body').inner_text()
         months=re.search(r'(\d+)\s*个月[，,]\s*每月约',body)
         actual_months=int(months[1]) if months else 0
-        if actual_months!=config.installment_months:
+        if actual_months!=payment_months(self.payment,config.installment_months):
             raise FlowError('最终核对页分期期数与授权不一致')
         store=await self.review_pickup_store(body)
         store_visible=store.name in body
@@ -948,8 +972,6 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             raise UserAction('此运行未获真实下单授权，不会点击立即下单')
         if self.submit_attempted:
             raise SubmissionUnknown('已尝试一次提交；只允许核对订单，禁止再次点击')
-        if self.payment!='招商银行' or config.installment_months!=24:
-            raise UserAction('此自动提交适配仅验证了招商银行 24 期；其他付款方式请在官网人工完成')
         summary=await self.review(config)
         summary.authorize(config)
         self.control.check()
@@ -969,20 +991,23 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         raise SubmissionUnknown('官网尚未返回可核对的订单号，进入订单核对')
 
     async def _current_receipt(self):
-        self.origin()
-        if urlsplit(self.page.url).path!='/shop/checkout/thankyou':
+        # A wallet may redirect to its provider. That is payment handoff, not
+        # Apple order confirmation; keep the once-only lock until confirmed.
+        if not apple_url(self.page.url) or urlsplit(self.page.url).path!='/shop/checkout/thankyou':
             return None
         order=self.page.get_by_role('link',name=re.compile(r'^订单\s*#[A-Z]\d{8,16}$'))
         heading=self.page.get_by_role('heading',level=1)
         if await order.count()!=1 or await heading.count()!=1:
             return None
-        if '订单正在等待付款' not in await heading.inner_text():
-            return None
+        title=await heading.inner_text()
+        if re.search(r'失败|已取消|已关闭|无法|未能',title):return None
+        pending=bool(re.search(r'订单.*(?:等待付款|尚未付款|未付款|待付款)',title))
+        if not pending and not re.search(r'(?:订单.*(?:已收到|已提交|已确认|正在处理)|(?:感谢|谢谢).*?(?:订单|购买))',title):return None
         order_id=re.search(r'[A-Z]\d{8,16}',await order.inner_text())[0]
         text=await self.page.locator('body').inner_text()
         window=re.search(r'请在\s*(\d+)\s*分钟内完成付款',text)
         deadline=(self.submit_started+timedelta(minutes=int(window[1]))).isoformat() if window and self.submit_started else None
-        return Receipt(order_id,'payment_pending',deadline)
+        return Receipt(order_id,'payment_pending' if pending else 'confirmed',deadline if pending else None)
 
     async def reconcile(self,config):
         # No match by mere confirmation text: a normal Apple order page needs an

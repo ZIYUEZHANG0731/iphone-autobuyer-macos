@@ -1,13 +1,11 @@
 """Click-only payment preferences, preserving saved method order and terms."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QListWidget, QListWidgetItem, QAbstractItemView
+from app.services.payment_methods import PAYMENT_METHODS, installment_payment
 
 
 # Preferences, not a promise of availability. The adapter still reads the
 # actual checkout radios and verifies the selected term before proceeding.
-PAYMENT_METHODS = ('招商银行', '支付宝', '微信支付', '中国建设银行', '中国工商银行', 'Apple Pay', '信用卡', '电汇')
-
-
 class PaymentChoices:
     def __init__(self):
         self.primary = QComboBox()
@@ -23,6 +21,8 @@ class PaymentChoices:
         self.terms.addItem('不选分期', 0)
         for months in (1, 3, 6, 12, 24):
             self.terms.addItem(f'{months} 期', months)
+        self.months=0
+        self.terms.currentIndexChanged.connect(self.term_changed)
         self.primary.currentIndexChanged.connect(self.sync_primary)
 
     def populate(self, methods, months):
@@ -39,13 +39,20 @@ class PaymentChoices:
             item.setCheckState(Qt.CheckState.Checked if method in methods[1:] else Qt.CheckState.Unchecked)
             self.backups.addItem(item)
         self.primary.blockSignals(False)
-        self.sync_primary()
         if self.terms.findData(months) < 0:
             self.terms.addItem(f'{months} 期（已有配置，需官网验证）', months)
-        self.terms.setCurrentIndex(self.terms.findData(months))
+        self.months=months
+        self.sync_primary()
+
+    def term_changed(self):
+        if self.terms.isEnabled():self.months=self.terms.currentData()
 
     def sync_primary(self):
         primary = self.primary.currentData()
+        self.terms.blockSignals(True)
+        self.terms.setEnabled(installment_payment(primary))
+        self.terms.setCurrentIndex(self.terms.findData(self.months) if self.terms.isEnabled() else 0)
+        self.terms.blockSignals(False)
         for row in range(self.backups.count()):
             item = self.backups.item(row)
             flags = item.flags() | Qt.ItemFlag.ItemIsEnabled

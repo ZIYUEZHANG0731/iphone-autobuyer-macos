@@ -238,6 +238,25 @@ def test_click_only_product_payment_and_authorization_preserve_saved_preferences
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
+def test_full_payment_shows_no_term_and_restores_bank_preference(qt,tmp_path):
+    window=MainWindow(tmp_path)
+    try:
+        window.config.payments=['招商银行','支付宝'];window.config.installment_months=6
+        window.populate();choices=window.payment_choices
+        assert window.installment.isEnabled() and window.installment.currentData()==6
+        for method in ('支付宝','微信支付','Apple Pay','信用卡','电汇'):
+            choices.primary.setCurrentIndex(choices.primary.findData(method))
+            assert not window.installment.isEnabled() and window.installment.currentData()==0
+            window.refresh_plan_summary(window.collect())
+            assert window.plan_payment.text().split(' → ')[0]==method
+            assert window.collect().installment_months==6
+        choices.primary.setCurrentIndex(choices.primary.findData('花呗分期'))
+        assert window.installment.isEnabled() and window.installment.currentData()==6
+        window.installment.setCurrentIndex(window.installment.findData(12))
+        window.save();assert window.repo.load_config().installment_months==12
+    finally:window.close();window.deleteLater();qt.processEvents()
+
+
 def test_official_duo_time_can_be_selected_without_typing_or_changing_the_instant(qt,tmp_path):
     window=MainWindow(tmp_path)
     try:

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Collection
 
 from app.models.config import Settings, Mode, ConfigError, apple_url, money
+from app.services.payment_methods import payment_plan
 from app.utils.scheduling import future_start
 
 
@@ -55,9 +56,7 @@ def preparation_items(config: Settings, *, mode: Mode = Mode.LIVE,
         '设置取货人' if not profile else '设置填写授权')
 
     payments = bool(config.payments and all(p.strip() for p in config.payments))
-    payment_detail = ' → '.join(config.payments)
-    if config.installment_months:
-        payment_detail += f' · {config.installment_months} 期'
+    payment_detail = payment_plan(config.payments,config.installment_months)
     add('payment', '付款方案', 'ready' if payments else 'missing',
         payment_detail + '；是否可用以结账页为准' if payments else '至少选择一种允许的付款方式', 3, '设置付款')
 

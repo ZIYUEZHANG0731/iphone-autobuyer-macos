@@ -50,6 +50,12 @@ def test_old_order_blocks_new_live_purchase_but_allows_dry_run():
     assert 'W1234567890' not in live['order'].detail
 
 
+def test_preparation_displays_terms_only_for_installment_schemes():
+    config=configured();config.payments=['微信支付','招商银行','支付宝'];config.installment_months=24
+    detail=next(i.detail for i in preparation_items(config) if i.key=='payment')
+    assert detail.startswith('微信支付 → 招商银行 · 24 期 → 支付宝；')
+
+
 @pytest.mark.parametrize(('mode','authorized','expected'),[
     (Mode.LIVE,True,'ready'),(Mode.LIVE,False,'manual'),(Mode.WEBSITE_DRY_RUN,True,'manual'),
 ])

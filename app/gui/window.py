@@ -31,6 +31,7 @@ from app.gui.product_settings import ProductChoices
 from app.services.catalog import CatalogCache,groups_from_controls,normalize_name,preorder_time
 from app.services.traffic import SiteCooldown
 from app.services.payment import PaymentStore
+from app.services.payment_methods import payment_plan
 from app.utils.paths import resource_path
 from app.utils.scheduling import wall_time,schedule_preview
 from app.services.readiness import preparation_items,PreparationItem
@@ -148,13 +149,13 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         f=QFormLayout();f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow);f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         f.addRow('首选付款方式',self.payment_choices.primary);f.addRow('分期期数',self.installment);c.addLayout(f)
         self.label(c,'备用付款方式','eyebrow');c.addWidget(self.payment_choices.backups)
-        self.label(c,'勾选需要的备用方式，可拖动排序。官网会重新确认可用方式与期数。','muted');row.addWidget(frame,1)
+        self.label(c,'勾选需要的备用方式，可拖动排序。分期期数只用于分期方案；支付宝、微信等普通付款不套用期数。','muted');row.addWidget(frame,1)
         frame,c=self.card();c.addLayout(section_header('填写与下单'));c.addWidget(divider())
         self.transmit=QCheckBox('自动填写所选取货人');self.transmit.setAccessibleName('允许向 Apple 中国大陆官网填写已提供的取货人信息');c.addWidget(self.transmit)
         self.label(c,'向 Apple 中国大陆官网填写已提供的姓名、联系方式和证件后四位。','muted');c.addWidget(divider())
         self.auto=QCheckBox('条件满足后自动提交订单');self.auto.setAccessibleName('允许在预设条件满足时自动提交真实订单');c.addWidget(self.auto)
         self.label(c,'仅用于真实购买。商品、数量、金额、门店和付款方案须通过最终核对；付款由你完成。','muted');c.addStretch()
-        self.label(c,'自动提交目前只支持招商银行 24 期。门店在官网选择并保存后确认，最终页无需再次显示门店名。','muted')
+        self.label(c,'官网可用的付款方式通过核对后自动提交，不限定银行或期数。银行卡、Apple Pay 等验证与实际付款在官网完成。','muted')
         self.label(c,'官网模拟下单会在最终核对时停止。','muted');row.addWidget(frame,1);l.addLayout(row)
         frame,c=self.card();c.addLayout(section_header('Apple 隐私声明 · 提前同意'));c.addWidget(divider())
         self.label(c,'默认自动勾选 Apple 中国大陆结账的两个隐私选项并继续，不弹出二次确认窗口。','muted')
@@ -272,7 +273,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.plan_details.setText(' · '.join(options+[f'{p.quantity} 件']))
         total=self.product_choices.total();self.plan_budget.setText(f'RMB {float(total):,.2f}（官网公布）' if float(total)>0 else '结账前核对官网价格')
         self.plan_stores.setText('\n'.join(s.name for s in config.stores if s.enabled) or '尚未选择门店')
-        self.plan_payment.setText(' → '.join(config.payments)+(f' · {config.installment_months} 期' if config.installment_months else '') or '尚未设置')
+        self.plan_payment.setText(payment_plan(config.payments,config.installment_months) or '尚未设置')
 
     def show_help(self):
         dialog=QDialog(self);dialog.setWindowTitle('使用帮助');dialog.resize(570,430)
@@ -321,7 +322,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         c.stores=[]
         for row in range(self.store_list.count()):
             item=self.store_list.item(row);store=self.store_directory.enrich(item.data(Qt.ItemDataRole.UserRole));store.enabled=item.checkState()==Qt.CheckState.Checked;c.stores.append(store)
-        c.payments=self.payment_choices.selected();c.installment_months=self.installment.currentData();c.auto_submit=self.auto.isChecked();c.transmit_identity=self.transmit.isChecked();c.allow_other_stores=self.other.isChecked();c.no_stock=self.no_stock.currentData();c.pickup_from=self.pickup_from.text().strip();c.pickup_to=self.pickup_to.text().strip();c.interval=self.interval.value();c.max_interval=max(60,c.interval);c.max_wait=self.wait.value()*60;c.scenario=self.scenario.currentData();c.display_timezone=self.current_zone()
+        c.payments=self.payment_choices.selected();c.installment_months=self.payment_choices.months;c.auto_submit=self.auto.isChecked();c.transmit_identity=self.transmit.isChecked();c.allow_other_stores=self.other.isChecked();c.no_stock=self.no_stock.currentData();c.pickup_from=self.pickup_from.text().strip();c.pickup_to=self.pickup_to.text().strip();c.interval=self.interval.value();c.max_interval=max(60,c.interval);c.max_wait=self.wait.value()*60;c.scenario=self.scenario.currentData();c.display_timezone=self.current_zone()
         c.keep_awake=self.keep_awake.isChecked()
         c.checkout_strategy=self.checkout_strategy.currentData();c.browser_kind=self.browser_kind.currentData()
         c.privacy_policy_accepted=self.privacy_policy.isChecked();c.privacy_transfer_acknowledged=self.privacy_transfer.isChecked()
@@ -564,7 +565,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         elif kind=='checkout_pickup':self.console_log.appendPlainText(data['message']+'：'+data['store'])
         elif kind=='checkout_page':
             stage={'loading':'正在加载','guest':'账户或游客入口','consent':'隐私声明','pickup':'取货门店','pickup_unavailable':'取货门店缺货，检查备用门店',
-                   'contact':'取货资料','payment':'付款方式'}.get(data['stage'],'正在加载')
+                   'contact':'取货资料','payment':'付款方式','review':'最终核对'}.get(data['stage'],'正在加载')
             self.console_log.appendPlainText('官网结账：'+stage)
         elif kind=='verification_required':
             self.message_label.setText(data['message']);self.tray.showMessage('需要 Apple 账户验证' if data.get('kind')=='apple_account' else '需要手机验证',data['message'],QSystemTrayIcon.MessageIcon.Information,10000)
