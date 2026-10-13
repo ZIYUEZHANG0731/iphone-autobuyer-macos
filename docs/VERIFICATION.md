@@ -4,6 +4,12 @@
 
 ## 环境与可运行产物
 
+### Windows v0.7.10 / build 53：真实官网核对通过
+
+软件直接连接专用 Chrome，修复商品页非购买 POST 中断造成的保存误判，以及加购慢跳转的观察恢复。源码真实流程 **60.78 秒**、实际便携版 GUI **62.02 秒**到达 REVIEW_READY / COMPLETED：iPhone 17 薰衣草紫色 / 256GB / 数量 1 / RMB 6,799、环球港自提、支付宝全额付款，均未点击「立即下单」，真实提交记录为 0。便携版第一次遇到结账文档 HTTP 500，停止该次试跑并保留会话后，重新核对同一购物袋完成；没有重新加购。
+
+完整源码 **614 passed / 3 macOS skipped / 371.18 秒**，冻结环境、GUI、内置 renderer 与隔离合成订单自检通过。真实网站证据、与 Codex 浏览器的独立结果、Demo 及剩余范围见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。本次没有新日常 Chrome 扩展授权或其他付款方案的真实验收。
+
 ### Windows v0.7.9 / build 52：macOS 共享修复迁移
 
 Windows 分支合入 macOS `main` 的 `9d9dada`，包括连接复用、必选取货时段、正常验证返回后的登录恢复、当前核对页的单次读取及入口刷新策略。Windows 的购物袋稳定、保存等待、地区处理和账户检查修复保留。迁移专项 **230 passed / 200.36 秒**，完整源码 **601 passed / 3 macOS skipped / 365.24 秒**。打包和独立真实网页结果见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)；下列 Mac 订单记录没有移入 Windows 用户数据。

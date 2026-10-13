@@ -2,7 +2,9 @@
 
 Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实网站试跑与受条件保护的下单工具。Python / PySide6 / Playwright，支持 macOS Apple Silicon 与 Windows 11 x64。
 
-> Windows 分支 `codex/windows-port` 最新源码为 v0.7.9 / build 52，已合入 macOS `main` 的 `9d9dada`：复用已有日常 Chrome 连接、选择必选取货时段、成功验证后的登录恢复，以及当前核对页的合并读取。Windows 原有购物袋稳定和保存等待、商品页账户入口与 15 秒账户导航继续保留。完整回归 601 项通过、3 项 macOS 专项跳过，迁移专项 230 项通过；分发结果见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md)。build 49 的持续日常 Chrome 会话曾确认登录，最新 Windows 真实核对页仍未通过；macOS `main` 的 v0.7.8 / build 50 记录独立保存。
+> Windows 分支 `codex/windows-port` 当前为 **v0.7.10 / build 53**。已改用软件直接连接的专用 Chrome，并由源码流程及实际 Windows 便携版分别在约 61 秒、62 秒完成真实 Apple 官网试跑至最终核对页：iPhone 17 薰衣草紫色 / 256GB / 1 件 / RMB 6,799，环球港自提，支付宝全额付款，未提交订单。完整回归 **614 passed / 3 macOS skipped**，分发自检通过。完整证据及服务错误记录见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md)。macOS `main` 的 `9d9dada` 共享修复继续保留。
+
+v0.7.10 修复购物袋保存误判：商品页被中断的非购买 POST 不再被当成购物袋保存失败，购物袋和结账写入仍须正常完成。加购点击的跳转超过动作等待时间后，先观察已发起的跳转及官网「查看购物袋」入口，再核对实际商品、数量和金额；不会重复点击加购。控制台当前使用「独立 Chrome · 软件专用会话」，首次日常 Chrome 连接仍遵循官方扩展的选择与授予流程。
 
 **macOS v0.7.8 的共享修复已迁入 Windows v0.7.9**：商品、金额、付款及核对页文字合并为一次当前 DOM 读取，保留核对阶段和提交前的两次独立检查。人工完成账户验证并返回结账后清除已完成的登录尝试记录，后续正常过期时可再尝试一次。macOS 验收记录中，日常 Chrome 已由软件创建真实 18 Pro 待付款订单并自动提取招商银行二维码；登录与签到时段有人工推进。这不是 Windows 本轮官网验收结果。
 
@@ -64,7 +66,7 @@ v0.6.4 已验证的内置登录修复继续保留。系统中文、地区德国�
 
 ## 启动
 
-Windows 便携版：已验证的迁移修复包为 `dist/build52/iPhone AutoBuyer Windows v0.7.9.zip`，其分发验收结果见 Windows 验证记录；正式构建脚本的默认输出仍在 `dist/`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
+Windows 便携版：当前已验证修复包为 **`dist/build53/iPhone AutoBuyer Windows v0.7.10.zip`**，其分发及真实官网结果见 Windows 验证记录；正式构建脚本的默认输出仍在 `dist/`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
 
 Windows 源码开发：
 

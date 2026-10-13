@@ -649,11 +649,14 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             try:
                 await self.page.get_by_role('button',name='添加到购物袋',exact=True).click()
             except PlaywrightTimeout:
-                raise UserAction("加购结果暂不明确，请在浏览器打开购物袋核对后继续；不会重复加购") from None
+                # The click may have succeeded while its navigation exceeded
+                # the action timeout. Observe the normal bag entry below;
+                # never click Add again or infer an empty bag from loading.
+                await self.guard()
         # Some products show the accessory attachment page; only its bag button is allowed.
         if '/shop/bag' not in self.page.url:
             try:
-                await self.page.get_by_role('button',name='查看购物袋',exact=True).wait_for(timeout=8000)
+                await self.page.get_by_role('button',name='查看购物袋',exact=True).wait_for(timeout=30000)
                 await self.page.get_by_role('button',name='查看购物袋',exact=True).click()
             except PlaywrightTimeout:
                 raise UserAction("官网加购后的页面已变化，请在浏览器打开购物袋后继续") from None

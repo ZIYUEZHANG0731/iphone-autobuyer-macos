@@ -32,7 +32,12 @@ class CheckoutUpdates:
 
     def started(self, request):
         path = urlsplit(request.url).path
-        if (apple_url(request.url) and path.startswith('/shop/')
+        # The product page also posts unrelated session/telemetry requests.
+        # Navigating away can abort those even after an HTTP 200 response.
+        # Only bag and checkout writes determine whether a purchase choice
+        # has finished saving; their failures must still stop continuation.
+        purchase_write = path.startswith(('/shop/bag', '/shop/checkout'))
+        if (apple_url(request.url) and purchase_write
                 and request.method not in {'GET', 'HEAD', 'OPTIONS'}):
             if not self.pending:
                 self.failed = False

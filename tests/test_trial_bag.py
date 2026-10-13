@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 import pytest
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Locator, TimeoutError as PlaywrightTimeout
 
 from app.adapters.apple import AppleAdapter
 from app.automation.control import Control
@@ -11,6 +11,47 @@ from app.automation.engine import Engine
 from app.models.flow import Summary
 from app.services.storage import Repository
 from decimal import Decimal
+
+
+async def test_add_click_timeout_recovers_the_written_bag_without_readding(monkeypatch):
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(headless=True);context=await browser.new_context();page=await context.new_page()
+        adds=[]
+        async def serve(route):
+            path=route.request.url.split('?')[0]
+            if path.endswith('/shop/bag/add-fixture'):
+                adds.append(route.request.method)
+                await route.fulfill(content_type='application/json',body='{}');return
+            if path.endswith('/shop/bag'):
+                html=('''<h1>购物袋总计 RMB 6,799</h1><h2>iPhone 17 256GB 白色</h2>
+                    <label>数量<select><option value="1" selected>1</option></select></label>
+                    <button>移除 iPhone 17 256GB 白色</button><button>结账</button>'''
+                    if adds else '<h1>你的购物袋中没有商品。</h1>')
+            elif path.endswith('/shop/buy-iphone/accessories'):
+                html='<button onclick="location.href=\'/shop/bag\'">查看购物袋</button>'
+            else:
+                html='''<h1>购买 iPhone 17</h1><button onclick="fetch('/shop/bag/add-fixture',{method:'POST'})
+                    .then(r=>r.json()).then(()=>location.href='/shop/buy-iphone/accessories')">添加到购物袋</button>'''
+            await route.fulfill(content_type='text/html; charset=utf-8',body=html)
+        await context.route('**/*',serve)
+        config=local_config();config.product.name='iPhone 17';config.product.max_total='6799'
+        config.product.url='https://www.apple.com.cn/shop/buy-iphone/iphone-17'
+        config.product.options={}
+        await page.goto(config.product.url)
+        original_click=Locator.click
+        async def acknowledged_late(locator,*args,**kwargs):
+            is_add=await locator.count()==1 and await locator.inner_text()=='添加到购物袋'
+            await original_click(locator,*args,**kwargs)
+            if is_add:raise PlaywrightTimeout('Navigation acknowledgment timed out after one click')
+        monkeypatch.setattr(Locator,'click',acknowledged_late)
+        adapter=AppleAdapter(page,Control(False))
+        try:
+            await adapter.select_pickup(Availability(Store('Apple 南京东路',store_id='R359'),True,'今天可取货'),config)
+            assert adds==['POST']
+            assert page.url.endswith('/shop/bag') and adapter.cart_checked
+            assert await page.get_by_role('combobox',name='数量').input_value()=='1'
+        finally:
+            adapter.detach();await browser.close()
 
 
 @pytest.mark.parametrize('mode,model,bag_model,quantity,adopt',[
