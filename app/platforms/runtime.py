@@ -18,3 +18,13 @@ def fit_window(window):
         width, height = max(1, available.width()-24), max(1, available.height()-24)
         window.setMinimumSize(min(1060, width), min(720, height))
         window.resize(min(1280, width), min(825, height))
+
+
+def fit_dialog(dialog):
+    """Keep the dialog's preferred size within the current logical work area."""
+    screen = dialog.screen()
+    if screen:
+        available = screen.availableGeometry()
+        width, height = max(1, available.width()-24), max(1, available.height()-24)
+        dialog.setMaximumSize(width, height)
+        dialog.resize(min(dialog.width(), width), min(dialog.height(), height))

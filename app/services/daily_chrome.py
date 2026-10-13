@@ -43,7 +43,8 @@ def selected_apple_page(pages):
     """Never select an arbitrary personal tab or a historic checkout by rank."""
     pages = [page for page in pages if not page.is_closed()]
     if len(pages) != 1 or not apple_url(pages[0].url):
-        raise FlowError('请在 Chrome 连接页只选择一个 Apple 中国商店页面，再重新接入')
+        reason='扩展没有提供页面' if not pages else '扩展提供了多个页面' if len(pages)>1 else '所选页面不是 Apple 中国商店'
+        raise FlowError(reason+'；请在 Chrome 的 Welcome 连接页只选择一个 Apple 中国商店页面，再重新接入')
     return pages[0]
 
 

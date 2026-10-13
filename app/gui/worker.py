@@ -27,7 +27,7 @@ from app.utils.power import KeepAwake
 from app.services.catalog_reader import read_catalog
 from app.services.traffic import SiteCooldown
 from app.services.signin import SignInController
-from app.services.login import apple_auth_url, shop_signin_url, session_page_url
+from app.services.login import apple_auth_url, shop_signin_url, session_page_url, browser_page_label
 from app.services.network_diagnosis import NetworkDiagnosis
 from app.platforms import system_label
 from app.utils.files import write_private_json
@@ -293,7 +293,12 @@ class Worker(QThread):
             adapter.detach()
 
     async def watch_payment(self, session, repo):
+        observed_page=None
         while not self.control.stop_event.is_set():
+            page_label=browser_page_label(session.page.url)
+            if page_label!=observed_page:
+                observed_page=page_label
+                self.data.emit('browser_page',{'browser':session.label,'page':page_label})
             if self.focus_requested.is_set():
                 self.focus_requested.clear()
                 try:
@@ -301,6 +306,9 @@ class Worker(QThread):
                     if hasattr(session,'focus_page'):await session.focus_page()
                     else:await page.bring_to_front()
                     if self.embedded:self.data.emit('embedded_focus',True)
+                    elif self.config.browser_kind=='daily_chrome':
+                        self.data.emit('browser_focus_status',
+                            '已请求显示 '+browser_page_label(page.url)+'；若 Chrome 仍在后台，请从任务栏打开 Chrome，在“Playwright · iPhone AutoBuyer”标签组选择此页面。')
                 except Exception:self.data.emit('browser_focus_error','软件浏览器尚未准备好，请查看当前会话状态')
             requested = self.qr_requested.is_set()
             self.qr_requested.clear()

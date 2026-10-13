@@ -71,6 +71,81 @@ async def test_pickup_mode_without_fixed_toggle_and_delayed_store_list_continue_
     assert not any('format@example.com' in json.dumps(d) for k,d in events)
 
 
+def missing_region_html(*,expanded=False,province='上海',city='上海',district='黄浦区'):
+    return '''<main><h1>选择取货零售店</h1>
+      <label><input id="shipping" type="radio" name="mode" checked>为我送货</label>
+      <label><input type="radio" name="mode">我要取货</label>
+      <button id="region" aria-label="false" aria-expanded="false" onclick="openRegion()">选择地区</button>
+      <div id="tabs" hidden><button role="tab" aria-label="省/市/自治区" aria-selected="true"
+        onclick="showPanel('province');this.setAttribute('aria-selected','true')">省/市/自治区</button></div>
+      <section id="province" role="tabpanel" hidden><button onclick="window.choices.push(this.textContent);showPanel(window.isMunicipality?'district':'city')">'''+province+'''</button></section>
+      <section id="city" role="tabpanel" hidden><button onclick="window.choices.push(this.textContent);showPanel('district')">'''+city+'''</button></section>
+      <section id="district" role="tabpanel" hidden><button onclick="window.choices.push(this.textContent);saveRegion()">'''+district+'''</button></section>
+      <div id="stores"></div><button id="next" disabled onclick="window.pickupClicks++;
+        document.querySelector('main').innerHTML=window.contactHTML">继续填写取货详情</button>
+      </main><script>
+      window.choices=[];window.regionClicks=0;window.pickupClicks=0;
+      window.isMunicipality='''+json.dumps(province==city)+''';
+      function showPanel(id){for(const p of document.querySelectorAll('[role=tabpanel]'))p.hidden=p.id!==id;}
+      function openRegion(){window.regionClicks++;document.querySelector('#region').setAttribute('aria-expanded','true');
+        document.querySelector('#tabs').hidden=false;showPanel('province');}
+      async function saveRegion(){document.querySelector('#region').textContent='上海 黄浦区';
+        document.querySelector('#region').setAttribute('aria-expanded','false');document.querySelector('#tabs').hidden=true;
+        for(const p of document.querySelectorAll('[role=tabpanel]'))p.hidden=true;
+        const r=await fetch('/shop/checkout/region-fixture',{method:'POST'});
+        if(r.ok)document.querySelector('#stores').innerHTML=window.storeHTML;}
+      '''+('openRegion();' if expanded else '')+'''</script>'''
+
+
+@pytest.mark.parametrize('expanded,geography',[(False,('上海','上海','黄浦区')),
+    (True,('上海','上海','黄浦区')),(False,('江苏','苏州','工业园区'))])
+async def test_reused_bag_sets_missing_region_before_selecting_allowed_store(checkout_page,expanded,geography):
+    page=checkout_page;queries=[];events=[]
+    async def save(route):
+        queries.append(route.request.method);await asyncio.sleep(.15)
+        await route.fulfill(content_type='application/json',body='{}')
+    await page.route('**/shop/checkout/region-fixture',save)
+    await page.set_content(missing_region_html(expanded=expanded,province=geography[0],city=geography[1],district=geography[2]))
+    await page.evaluate('''html=>{window.contactHTML=html;window.storeHTML=`<label><input type="radio" name="store" value="R359"
+      onchange="document.querySelector('#next').disabled=false">1 Apple 南京东路 今天可取货</label>`}''',CONTACT)
+    config=settings();adapter=adapter_for(page,events=events)
+    # Substitute only fixture geography, leaving normal ID/name validation intact.
+    enrich=adapter.store_directory.enrich
+    def fixture_store(store):
+        row=enrich(store);row.province,row.city,row.district=geography;return row
+    adapter.store_directory.enrich=fixture_store
+    await adapter.fill_customer(contact(),config)
+    await adapter.fill_customer(contact(),config)
+    assert queries==['POST'] and await page.evaluate('window.regionClicks')==1
+    assert await page.evaluate('window.choices')==list(dict.fromkeys(geography))
+    assert await page.evaluate('window.pickupClicks')==1
+    assert adapter.checkout_pickup_confirmed[1].store_id=='R359'
+    assert any(kind=='checkout_region' for kind,data in events)
+    assert not adapter.add_attempted
+
+
+async def test_failed_region_save_preserves_bag_without_continuing(checkout_page):
+    page=checkout_page
+    await page.route('**/shop/checkout/region-fixture',lambda r:r.fulfill(status=503,body='{}'))
+    await page.set_content(missing_region_html())
+    adapter=adapter_for(page)
+    with pytest.raises(UserAction,match='取货地区的保存'):
+        await adapter.fill_customer(contact(),settings())
+    assert await page.evaluate('window.pickupClicks')==0
+    assert not adapter.add_attempted and not adapter.pickup_continue_attempted
+
+
+async def test_unknown_region_picker_pauses_without_choosing_shipping(checkout_page):
+    page=checkout_page;await page.set_content(missing_region_html())
+    await page.get_by_role('tab',name='省/市/自治区',include_hidden=True).evaluate("e=>e.setAttribute('aria-label','未知标签')")
+    adapter=adapter_for(page)
+    with pytest.raises(UserAction,match='取货省市标签'):
+        await adapter.fill_customer(contact(),settings())
+    assert await page.evaluate('window.choices')==[]
+    assert not await page.locator('#shipping').is_checked()
+    assert await page.evaluate('window.pickupClicks')==0
+
+
 async def test_consent_disappearing_before_fulfillment_loads_is_not_a_pause(checkout_page):
     page=checkout_page
     pickup=pickup_html()

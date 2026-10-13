@@ -32,8 +32,31 @@ def test_expired_qr_cannot_copy_or_export(qt,tmp_path,monkeypatch):
     try:
         assert not dialog.copy_button.isEnabled() and not dialog.save_button.isEnabled()
         assert dialog.image.pixmap() is None or dialog.image.pixmap().isNull()
+        dialog.show();dialog.resize(400, 420);qt.processEvents()
+        assert dialog.image.pixmap() is None or dialog.image.pixmap().isNull()
         dialog.copy_image();dialog.save_image()
         assert not writes and not destination.exists()
+    finally:dialog.close();dialog.deleteLater();qt.processEvents()
+
+
+def test_payment_dialog_resizes_display_without_changing_the_copied_image(qt, tmp_path, monkeypatch):
+    source = tmp_path/'synthetic.png'
+    image = QImage(400, 400, QImage.Format.Format_RGB32);image.fill(0xffffff)
+    assert image.save(str(source), 'PNG')
+    store = PaymentStore(tmp_path)
+    handoff = store.save(source.read_bytes(), order_id='W1234567890', product='Synthetic only', payment='支付宝')
+    copied = []
+    monkeypatch.setattr(QApplication, 'clipboard', lambda: SimpleNamespace(setImage=lambda value: copied.append(value.size())))
+    dialog = PaymentDialog(store, handoff)
+    try:
+        dialog.show();dialog.resize(400, 400);qt.processEvents()
+        displayed = dialog.image.pixmap()
+        assert displayed and not displayed.isNull()
+        assert displayed.width() == displayed.height()
+        assert displayed.width() <= dialog.image.width() and displayed.height() <= dialog.image.height()
+        dialog.copy_image()
+        assert copied == [image.size()]
+        assert store.image_path(handoff).read_bytes() == source.read_bytes()
     finally:dialog.close();dialog.deleteLater();qt.processEvents()
 
 

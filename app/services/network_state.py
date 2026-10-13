@@ -78,6 +78,11 @@ async def read_scutil(arguments: tuple[str, ...]) -> str:
 
 
 async def read_local_network() -> dict:
+    if sys.platform == 'win32':
+        from app.platforms.windows_network import read_network_snapshot
+        state = await asyncio.to_thread(read_network_snapshot)
+        state['proxy_environment_keys'] = [key for key in PROXY_ENV if os.environ.get(key)]
+        return state
     if sys.platform != 'darwin' or not Path('/usr/sbin/scutil').is_file():
         return {'available': False}
     results = await asyncio.gather(*(read_scutil(args) for args in SCUTIL_QUERIES.values()),
@@ -95,9 +100,9 @@ async def read_local_network() -> dict:
 def network_summary(state: dict) -> str:
     if not state.get('available'):
         return '本机网络信息暂时无法读取；浏览器会话保留。'
-    interfaces = state.get('active_interfaces', {})
-    flags = state.get('system_proxy_flags', [])
-    parts = ['检测到隧道接口' if interfaces.get('tunnel') else '未检测到隧道接口',
-             '系统代理已启用' if flags else '未检测到系统代理开关',
+    interfaces = state.get('active_interfaces')
+    flags = state.get('system_proxy_flags')
+    parts = ['接口状态未确认' if interfaces is None else '检测到隧道接口' if interfaces.get('tunnel') else '未检测到隧道接口',
+             '系统代理状态未确认' if flags is None else '系统代理已启用' if flags else '未检测到系统代理开关',
              'IPv6 可用' if state.get('ipv6_available') else 'IPv4 可用' if state.get('ipv4_available') else 'IP 状态未确认']
     return '本机网络：'+' · '.join(parts)+'。这不能确认公网出口；切换网络后的登录仍需官网验证。'

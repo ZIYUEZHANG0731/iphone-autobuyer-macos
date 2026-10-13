@@ -155,6 +155,7 @@ class NetworkDiagnosis:
         self.started = datetime.now(timezone.utc).isoformat()
         self.runtime = {}
         self.page_samples = []
+        self.page_history = deque(maxlen=16)
         self.health = {'request_events': 0, 'response_events': 0, 'capture_errors': 0}
         self.events = deque(maxlen=160)
         self.tasks = set()
@@ -317,6 +318,8 @@ class NetworkDiagnosis:
                 samples.append(sample)
         if samples != self.page_samples:
             self.page_samples = samples
+            self.page_history.append({'time':datetime.now(timezone.utc).isoformat(),
+                                      'samples':samples})
             self.save()
 
     def observe_response(self, response):
@@ -426,7 +429,7 @@ class NetworkDiagnosis:
     def save(self):
         try:
             write_private_json(self.path, {'started_at': self.started, 'browser': self.kind, 'runtime': self.runtime,
-                'page_samples': self.page_samples, 'health': self.health,
+                'page_samples': self.page_samples, 'page_history':list(self.page_history), 'health': self.health,
                 'network_samples': list(self.network_samples), 'events': list(self.events)})
         except OSError:
             pass

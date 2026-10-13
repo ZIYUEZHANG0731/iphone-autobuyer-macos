@@ -2,9 +2,10 @@ from __future__ import annotations
 from app.platforms.files import protect_path
 
 from datetime import datetime, timezone
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QSizePolicy
+from app.platforms.runtime import fit_dialog
 from app.models.flow import FlowError
 from app.services.payment import PaymentHandoff, PaymentStore
 
@@ -33,6 +34,9 @@ class PaymentDialog(QDialog):
             raise FlowError("付款二维码图片无法读取")
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setMinimumSize(1, 1)
+        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.image.installEventFilter(self)
         layout.addWidget(self.image, 1)
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -59,6 +63,18 @@ class PaymentDialog(QDialog):
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
         self.refresh()
+        fit_dialog(self)
+
+    def refresh_image(self):
+        if not self.handoff.expired():
+            side = max(1, min(280, self.image.width(), self.image.height()))
+            self.image.setPixmap(self.pixmap.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio,
+                                                   Qt.TransformationMode.FastTransformation))
+
+    def eventFilter(self, watched, event):
+        if watched is self.image and event.type() == QEvent.Type.Resize:
+            self.refresh_image()
+        return super().eventFilter(watched, event)
 
     def refresh(self):
         expired = self.handoff.expired()
@@ -69,7 +85,7 @@ class PaymentDialog(QDialog):
             self.image.setText("付款时限已过\n请在 Apple 官网确认订单状态")
             self.status.setText("已停止显示和导出这个付款码，避免发送过期图片。")
         else:
-            self.image.setPixmap(self.pixmap.scaled(280, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation))
+            self.refresh_image()
             if self.handoff.payment_deadline:
                 left = max(0, int((datetime.fromisoformat(self.handoff.payment_deadline) - datetime.now(timezone.utc)).total_seconds()))
                 self.status.setText(f"最迟付款倒计时：{left//60:02d}:{left%60:02d}。付款状态以 Apple 官网为准。")

@@ -8,7 +8,7 @@ from app.automation.control import Control
 from app.gui.worker import Worker
 from app.models.config import Settings
 from app.models.flow import UserAction
-from app.services.login import STORE_ENTRY, shop_signin_url, visible_login_form
+from app.services.login import ACCOUNT_ENTRY, STORE_ENTRY, shop_signin_url, visible_login_form
 from app.services.signin import SignInController, credential_origin
 
 
@@ -93,6 +93,40 @@ async def test_logged_in_store_is_verified_through_its_visible_account_link_with
         result=await worker.browser_action(SimpleNamespace(page=page),None)
         assert result['state']=='COMPLETED' and '无需重新登录' in result['message']
         assert requests==[STORE_ENTRY,ACCOUNT_URL] and page.url==ACCOUNT_URL
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('entry', [STORE_ENTRY, 'https://secure9.www.apple.com.cn/shop/bag'])
+@pytest.mark.parametrize('expired', [False, True])
+async def test_public_session_check_uses_website_account_entry_and_preserves_original_page(browser,entry,expired):
+    import json
+    context=await browser.new_context();page=await context.new_page();requests=[]
+    async def respond(route):
+        requests.append((route.request.method,route.request.url))
+        body=STORE_HTML.replace('MENU_JSON',json.dumps(REMEMBERED_MENU)) if route.request.url==entry else FORM_HTML
+        if route.request.url==ACCOUNT_URL and not expired:
+            body='<a href="/shop/signOut">退出登录 测试账户</a>'
+        await route.fulfill(content_type='text/html; charset=utf-8',body=body)
+    await context.route('**/*',respond)
+    try:
+        await page.goto(entry)
+        result=await AppleAdapter(page,Control(False)).check_login(auto_recover=False)
+        assert result is (not expired)
+        assert requests==[('GET',entry),('GET',entry),('GET',ACCOUNT_URL)]
+        assert page.url==entry and context.pages==[page]
+        assert await page.locator('#globalnav-menubutton-link-bag').get_attribute('aria-expanded')=='false'
+    finally:await context.close()
+
+
+@pytest.mark.e2e
+async def test_unsigned_public_menu_still_requires_fresh_protected_login_check(browser):
+    context,page,requests=await store_fixture(browser,'<a href="/shop/signIn">登录</a>')
+    try:
+        await page.goto(STORE_ENTRY)
+        assert await AppleAdapter(page,Control(False)).check_login(auto_recover=False) is False
+        assert requests==[STORE_ENTRY,STORE_ENTRY,ACCOUNT_ENTRY]
+        assert page.url==STORE_ENTRY and context.pages==[page]
     finally:await context.close()
 
 

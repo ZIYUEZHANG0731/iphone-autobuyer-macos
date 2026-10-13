@@ -1,5 +1,7 @@
 # Windows 迁移准备：第一阶段（v0.7.6 / build 44）
 
+> Windows 真机后续修复与验收已推进到 build 46，最新状态见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。本文保留第一阶段实现和当时边界。
+
 更新时间：2026-10-13。分支：`codex/windows-port`。从已经验证的 v0.7.5 / build 43、`05ba1efee6c0b5b21d9ec226c02abd63260c1844` 开始，在独立工作树完成源码适配和 Windows 开发入口。`main`、本机已安装的 Mac 应用和正式用户数据继续保留。准确命令、测试结果、提交和逐项验收见 [Windows 交接](WINDOWS_HANDOFF.md)。
 
 **这是 Windows 真机验收前的交付。** macOS 的 Windows 分支夹具、Windows wheel 下载和 PowerShell 语法解析不等于 Windows API、Windows 浏览器、Windows 安装包或 Apple 官网通过。本阶段没有生成 Windows exe，也没有进行真实官网登录、下单或付款。

@@ -1,8 +1,8 @@
-# iPhone AutoBuyer for macOS
+# iPhone AutoBuyer for macOS / Windows
 
-Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实网站试跑与受条件保护的下单工具。Python / PySide6 / Playwright，Apple Silicon。
+Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实网站试跑与受条件保护的下单工具。Python / PySide6 / Playwright，支持 macOS Apple Silicon 与 Windows 11 x64。
 
-> Windows 第一阶段源码适配位于 `codex/windows-port`（v0.7.6 / build 44），Windows 真机与分发验收待完成。macOS 的 `main` 和已安装 v0.7.5 / build 43 保留。继续迁移请按 [Windows 交接](docs/WINDOWS_HANDOFF.md) 的命令和清单执行。
+> Windows 分支 `codex/windows-port` 已完成本机源码与便携包验收（v0.7.6 / build 47）：544 项通过，3 项 macOS 专项跳过。修正商店/购物袋的账户复核路径，补齐 Windows 原生网络诊断并显示实际所选页面。新版包位于 `dist/build47/`；原生权限、Chrome / 内置浏览器离线流程及分发自检均已检查，build 46 另已验证解压后的独立运行。真实官网已进入取货信息页；独立 Chrome 认证仍有 503，日常 Chrome 已接入，但结账仍要求重新认证，尚未到最终核对页。已录本机公开界面 Demo。详见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md) 和 [便携版使用](docs/WINDOWS_QUICKSTART.md)。macOS `main` 保留 v0.7.5 / build 43。
 
 **v0.7.5**：付款选择与自动提交不再限定招商银行 24 期。支付宝、微信支付使用普通付款；花呗分期、微信分付与银行方案按所选期数检查。首选银行不可用时，备用普通付款不会继承银行期数；两种浏览器均在最终核对通过后提交一次。官网是否提供该方式、是否要求额外验证仍由实际页面决定。
 
@@ -11,6 +11,8 @@ Apple 中国大陆官网 iPhone 17、18 系列与 Duo 的购买准备、真实�
 账号密码和取货资料默认加密保存在本机，退出重开后自动载入，不需要再次输入、系统钥匙串确认或另外设置授权密码。两个表单均可取消「记住在这台电脑上」改为仅本次使用。
 
 取货门店勾选后，等待官网保存选择，再核对门店并继续填写取货详情。保存失败或超时保留购物袋，普通资源请求不影响这一等待。真实官网验收和开发回归分别记录在[验证清单](docs/VERIFICATION.md)。
+
+复用购物袋进入结账时，官网若尚未选择地区，会按首选允许门店的省市和区县设置，再核对供货及门店优先级。已保存地区不重复设置；地区选择失败或未知控件暂停并保留购物袋。
 
 账户结账等待 Apple 登录框真正载入，再使用本机已保存账号；不在表单加载途中切换游客。内置浏览器会先恢复网页视图并确认控件动作生效，付款方式与分期方案也等待官网保存结果再继续。官网的验证码仍由本人完成。
 
@@ -55,6 +57,18 @@ v0.6.4 已验证的内置登录修复继续保留。系统中文、地区德国�
 历史 v0.4.3 / build 12 的稳定性检查保留在[验证清单](docs/VERIFICATION.md)。v0.4.0 的现货试跑 20.27 秒到达 Apple 数据隐私协议；尚未开售的 Duo 结账和双浏览器首发优势不宣称已经通过。
 
 ## 启动
+
+Windows 便携版：本轮最新版为 `dist/build47/iPhone AutoBuyer Windows v0.7.6.zip`；正式构建脚本的默认输出仍为 `dist/iPhone AutoBuyer Windows v0.7.6.zip`。完整解压后双击其中的 `iPhone AutoBuyer.exe`；保持 `_internal` 相邻，无需 Python / Node。默认数据位于 `%LOCALAPPDATA%\Apple AutoBuyer`。首次填写本机资料并正常完成 Apple 验证，不复制 Mac 密钥或浏览器资料。
+
+Windows 源码开发：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run.ps1
+```
+
+默认 setup 使用 Python 3.13 x64 launcher；已有 Python 3.12+ x64 可传 `-Python` 完整路径，详见 [Windows 交接](docs/WINDOWS_HANDOFF.md)。`scripts/build.ps1` 完整回归后构建、自检并生成便携 ZIP 和 SHA256。以下启动及打包命令为 macOS。
 
 本机应用：`~/Applications/iPhone AutoBuyer.app`，可通过 Finder 双击。首次在「诊断…」点击「检查环境」。内置浏览器随应用打包；独立模式使用已安装的 Google Chrome，没有 Chrome 且 Chromium 缺失时点击「安装浏览器」。
 
@@ -175,7 +189,7 @@ python3 -m venv .venv
 
 `prepare_plugins()` 处理此工作目录忽略文件被自动标为 Finder 隐藏后导致 Qt 发现不到 Cocoa 插件的问题，只调整软件自己的插件隐藏标记，不关闭系统安全保护。打包脚本清除生成 App 的 FinderInfo/ResourceFork 元数据后签名，不删除 quarantine。
 
-Windows 的系统依赖与 PowerShell 入口已整理，真机移植仍待验收，见 [Windows 迁移准备](docs/WINDOWS_PREPARATION.md)。
+Windows 的构建、完整目录自检和便携打包使用 `scripts/build.ps1`；最新本机结果与未完成的人工 / 官网部分见 [Windows 第二阶段验收](docs/WINDOWS_VERIFICATION.md)。
 
 ## 验证与资料
 

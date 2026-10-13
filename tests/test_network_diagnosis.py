@@ -125,13 +125,20 @@ async def test_diagnostics_records_cross_origin_frame_request_and_error_without_
             while not any(e.get('service_error_codes') for e in diagnosis.events) and asyncio.get_running_loop().time()<deadline:
                 await asyncio.sleep(.03)
             await diagnosis.sample_pages()
+            # Closing the Apple tab used to erase the last real auth-frame
+            # capability sample, leaving only the initial about:blank runtime.
+            observed=list(diagnosis.page_samples)
+            await session.page.close()
+            await diagnosis.sample_pages()
         finally:
             await diagnosis.close()
         report=json.loads(diagnosis.path.read_text(encoding='utf-8'))
         assert report['health']['capture_errors']==0
         assert any(e['family']=='auth_init' and e.get('phase')=='request_started' for e in report['events'])
         assert any(e.get('service_error_codes')==['-12345'] for e in report['events'])
-        frame=next(s for s in report['page_samples'] if not s['main_frame'])
+        assert report['page_samples']==[]
+        assert any(item['samples']==observed for item in report['page_history'])
+        frame=next(s for s in observed if not s['main_frame'])
         assert frame['secure_context'] and frame['webcrypto'] and frame['identity_unverified_visible']
         assert 'PRIVATE' not in diagnosis.path.read_text(encoding='utf-8') and 'fixture@example' not in diagnosis.path.read_text(encoding='utf-8')
         assert credential_origin('https://idmsa.apple.com.cn/appleauth/auth/authorize')

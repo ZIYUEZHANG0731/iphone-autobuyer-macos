@@ -6,7 +6,8 @@ from playwright.async_api import Error as PlaywrightError
 from app.models.flow import RateLimited, UserAction
 from app.services.login import (LOGOUT_LABEL, STORE_ENTRY, account_check_url,
     apple_auth_url, authenticated_account_page, follow_store_account, show_store_bag,
-    store_page_url, store_signin_link, visible_login_form)
+    storefront_page_url, store_page_url, store_signin_link, visible_login_form,
+    ACCOUNT_ENTRY)
 
 
 class AppleLogin:
@@ -125,6 +126,12 @@ class AppleLogin:
             try:
                 target = await account_check_url(self.page) if not keep else None
                 response=None if keep else await account.goto(target,wait_until='domcontentloaded',timeout=5000)
+                if not keep and storefront_page_url(account.url):
+                    await self.guard(account,allow_busy=True)
+                    if not await follow_store_account(account):
+                        # An unsigned public menu is not login proof. Obtain
+                        # the normal protected response before reporting False.
+                        response=await account.goto(ACCOUNT_ENTRY,wait_until='domcontentloaded',timeout=5000)
             except PlaywrightError:
                 self.progress('login',{'authenticated':None,'checked_at':datetime.now(timezone.utc).isoformat(),'reason':'账户页暂时无法连接；沿用现有会话，结账时再检查'})
                 return None

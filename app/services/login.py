@@ -13,6 +13,24 @@ LOGOUT_LABEL = re.compile(r'注销|退出登录')
 SIGNIN_LABEL = re.compile(r'^(登录|登入|Sign In|Log In)$', re.I)
 
 
+def browser_page_label(url):
+    """Describe the connected page without exposing URLs or account data."""
+    if apple_auth_url(url):
+        return 'Apple 认证页'
+    if not apple_url(url):
+        return '当前连接页不是 Apple 中国商店'
+    path=urlsplit(url).path.rstrip('/')
+    if shop_signin_url(url):return 'Apple 账户登录页'
+    if order_list_url(url):return '订单列表'
+    if order_detail_url(url):return '订单详情'
+    if account_page_url(url):return 'Apple 账户页'
+    if path=='/shop/bag':return '购物袋'
+    if path.startswith('/shop/checkout'):return '结账页'
+    if path.startswith('/shop/buy-iphone'):return '商品页'
+    if path=='/store':return 'Apple 中国商店'
+    return 'Apple 中国官网'
+
+
 def shop_signin_url(url):
     return apple_url(url) and (urlsplit(url).path == '/shop/signIn'
                               or urlsplit(url).path.startswith('/shop/signIn/'))
@@ -20,6 +38,10 @@ def shop_signin_url(url):
 
 def store_page_url(url):
     return apple_url(url) and urlsplit(url).path.rstrip('/') == '/store'
+
+
+def storefront_page_url(url):
+    return apple_url(url) and urlsplit(url).path.rstrip('/') in ('/store', '/shop/bag')
 
 
 def session_page_url(url):
@@ -40,6 +62,10 @@ def order_detail_url(url):
 async def account_check_url(page):
     """Use the selected page's normal protected entry, without changing nodes."""
     if session_page_url(page.url):
+        return page.url
+    if storefront_page_url(page.url):
+        # Reload an auxiliary copy, then follow its actual account link. A
+        # generic account entry can establish a different Store node/context.
         return page.url
     if order_detail_url(page.url):
         orders = page.get_by_role('link', name=re.compile(r'^查看你的订单')).filter(visible=True)
@@ -73,7 +99,7 @@ async def authenticated_account_page(page):
 
 async def show_store_bag(page, *, timeout=5000):
     """Open the normal visible Store menu, without calling any bag/auth API."""
-    if not store_page_url(page.url):
+    if not storefront_page_url(page.url):
         raise UserAction('当前页面不是 Apple 中国商店，请从商店购物袋登录')
     button = page.locator('#globalnav-menubutton-link-bag').filter(visible=True)
     await button.wait_for(state='visible', timeout=timeout)

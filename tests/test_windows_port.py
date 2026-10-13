@@ -123,11 +123,14 @@ def test_native_windows_acl_protects_unicode_directory_and_inherited_file(tmp_pa
     root = files.private_directory(tmp_path / '中文 用户 空格')
     child = root / '合成.txt';child.write_text('synthetic only', encoding='utf-8')
     # Read ACL via an independent Windows API client, not our setter.
-    env = {**os.environ, 'AUTOBUYER_ACL_FIXTURE': str(child)}
+    # Python launched from PowerShell 7 inherits its module search path. Native
+    # Windows PowerShell must resolve its own Security module for Get-Acl.
+    env = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+    env['AUTOBUYER_ACL_FIXTURE'] = str(child)
     result = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
         "$a=Get-Acl -LiteralPath $env:AUTOBUYER_ACL_FIXTURE; $a.Sddl"],
         env=env, capture_output=True, text=True, encoding='utf-8', timeout=15)
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stderr
     sddl = result.stdout.strip()
     assert windows.current_user_sid() in sddl and ';;;SY)' in sddl and ';;;BA)' in sddl
     assert all(';;;' + sid + ')' not in sddl for sid in ('WD', 'BU', 'AU'))
@@ -144,15 +147,24 @@ def test_process_crash_releases_only_runtime_lock_and_preserves_unknown_order(tm
     code = "from pathlib import Path; import sys, time; from app.platforms.locking import ProcessLock; lock=ProcessLock(Path(sys.argv[1])); lock.__enter__(); print('LOCKED',flush=True); time.sleep(30)"
     process = subprocess.Popen([sys.executable, '-c', code, str(root / 'session.lock')],
                                stdout=subprocess.PIPE, text=True, encoding='utf-8')
+    def terminate_fixture():
+        if sys.platform == 'win32':
+            # A Windows venv redirector may spawn the real Python process.
+            # Killing only the launcher leaves that lock holder alive.
+            subprocess.run(['taskkill.exe', '/PID', str(process.pid), '/T', '/F'],
+                           capture_output=True, timeout=10, check=True)
+        else:
+            process.kill()
+        process.wait(timeout=10)
     try:
         assert process.stdout.readline().strip() == 'LOCKED'
         with pytest.raises(FlowError):
             with ProcessLock(root / 'session.lock'):pass
-        process.kill();process.wait(timeout=10)
+        terminate_fixture()
         with ProcessLock(root / 'session.lock'):pass
         reopened = Repository(repo.path)
         assert reopened.submission('synthetic-intent')['status'] == 'UNKNOWN'
         assert not reopened.claim_submission('synthetic-intent', 'synthetic-restart')
     finally:
-        if process.poll() is None:process.kill();process.wait(timeout=10)
+        if process.poll() is None:terminate_fixture()
         process.stdout.close()

@@ -1,4 +1,18 @@
-# Apple 登录诊断：2026-10-12
+# Apple 登录诊断
+
+## Windows：2026-10-13，build 47
+
+Windows 的真实认证提交仍有 503，根因尚未确认。用户报告日常 Chrome 可以正常登录；本轮软件已经通过官方扩展接入日常 Chrome，但新的受保护账户读取和实际结账仍要求认证。不能把 Mac 的成功记录直接当作 Windows 登录通过。
+
+- build 46 软件独立 Chrome 的运行语言为 `zh-CN,zh`、引擎为 Chrome 151。**14:39:33 Europe/Berlin** 中国区 `idmsa.apple.com.cn` 初始化返回 200 / JSON，**14:39:37** 认证提交返回 503 / HTML。内置页面另已只读确认中国商店域名、认证域名及中文页面/框架语言。没有改认证域名、UA 或网络；不能单独归因于 Chromium 140，也不能将 503 当作密码错误。
+- **14:52:10 Europe/Berlin**，日常 Chrome 扩展连接成立，账户复核显示登录表单。**14:54:30** 同一连接的官网模拟复用核对一致的购物袋后，在账户结账处要求重新登录并暂停；真实订单提交仍为 0。用户看到的其他 Chrome 标签页和软件所选标签页需要分别判断。
+- 复核源码发现，选中商店/购物袋时旧检查直接使用通用账户地址。build 47 改为在辅助页重新读取当前商店/购物袋，再沿其正常账户链接检查受保护响应，原页不导航。没有已记住账户时仍请求受保护入口；真实登录表单优先，菜单姓名或退出链接本身不算成功。完全拦截夹具同时覆盖通用入口要求登录、当前正常账户入口成功，以及该入口已过期的情况。这是检查路径修复，尚未证明它能消除真实 503。
+- Windows 网络诊断原来只支持 `scutil`，始终记录 unavailable。新增原生只读采样：WinINet 的 LAN 代理开关、GetAdaptersAddresses 的活动接口类别/数量、IP 版本和 DNS 集合摘要。按微软文档优先查询 `INTERNET_PER_CONN_FLAGS_UI`，失败才回退 `FLAGS`；不读取代理目的地，不修改设置，不查询外部出口。第三方 VPN 数量未枚举，明确为 unknown，接口类型也不能排除虚拟以太网或按程序转发。参考 [代理选项结构](https://learn.microsoft.com/en-us/windows/win32/api/wininet/ns-wininet-internet_per_conn_optionw)、[GetAdaptersAddresses](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses)。
+- 诊断保留最多 16 次已脱敏的页面环境变化；关闭标签页不会再擦掉先前 HTTPS 认证框架的观察。`browser_start` 的 about:blank 能力不能用于断言 HTTPS 登录页缺少 WebCrypto。界面显示软件实际所选页的固定阶段；日常 Chrome 在后台时，打开浏览器提示指出应选择官方扩展的标签组。连接失败区分没有页面、多个页面和非中国商店页面，不输出私人标签页 URL。
+
+现场脱敏比较见本机 `reports/windows-login-investigation.json`；完整回归、打包与剩余真实验收见 [Windows 验证](WINDOWS_VERIFICATION.md)。本轮源码没有重发密码、复制 Cookie 或操作真实订单。
+
+## macOS 历史结论：2026-10-12
 
 当前结论：v0.6.4 / build 25 内置浏览器已实际完成中国商店认证、双重验证、商店回调及受保护账户页；18:03:59 UTC 软件确认登录。此次客户端仅修改内置 profile 的语言偏好，由 `zh-DE` 改为 `zh-CN,zh`，没有调整网络、认证域名、UA、引擎或安全设置。用户同步确认登录成功。独立 Chrome 在前一版本也已登录成功。当前结果支持错误语言偏好是本次内置失败的重要因素；没有为反向验证再改回错误语言提交密码，也不把结论推广至所有历史 503 / 541。仅记住账户不算登录成功。
 

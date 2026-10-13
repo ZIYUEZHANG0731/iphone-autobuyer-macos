@@ -101,9 +101,14 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     contact='<h1>取货联系信息</h1>'+''.join('<label>'+label+'<input></label>' for label in
                         ('姓氏','名字','电子邮件地址','联系人手机号码','政府颁发的身份证件号码的后四位'))+'<button>继续选择付款方式</button>'
                     await session.page.set_content("""<h1>选择取货零售店</h1>
-                        <label><input type="radio" name="store" value="R359">2 Apple 南京东路 今天可取货</label>
+                        <button id="region" aria-label="false" aria-expanded="false" onclick="this.setAttribute('aria-expanded','true');document.querySelector('#province').hidden=false;document.querySelector('#tabs').hidden=false">选择地区</button>
+                        <div id="tabs" hidden><button role="tab" aria-label="省/市/自治区" aria-selected="true">省/市/自治区</button></div>
+                        <section id="province" role="tabpanel" hidden><button onclick="document.querySelector('#province').hidden=true;document.querySelector('#district').hidden=false">上海</button></section>
+                        <section id="district" role="tabpanel" hidden><button onclick="window.regions++;document.querySelector('#region').textContent='上海 黄浦区';document.querySelector('#tabs').hidden=true;document.querySelector('#district').hidden=true;
+                          fetch('/shop/checkout/region-fixture',{method:'POST'}).then(()=>document.querySelector('#stores').innerHTML=window.stores)">黄浦区</button></section>
+                        <div id="stores"></div>
                         <button style="margin-top:1400px" onclick="window.continues++;document.body.innerHTML=window.contact">继续填写取货详情</button>
-                        <script>window.continues=0</script>""")
+                        <script>window.continues=0;window.regions=0;window.stores='<label><input type="radio" name="store" value="R359">2 Apple 南京东路 今天可取货</label>'</script>""")
                     await session.page.evaluate('html=>window.contact=html',contact)
                     adapter.selected=Availability(Store('Apple 南京东路',store_id='R359'),True,'今天可取货')
                     self.browser_hidden.clear();self.hide_browser.emit()
@@ -111,6 +116,7 @@ def test_embedded_browser_reuses_tabs_persists_session_cookies_and_quits_cleanly
                     config=Settings(stores=[Store('Apple 南京东路',store_id='R359')],transmit_identity=True)
                     await adapter.fill_customer(Identity('格式测试','居民身份证后四位','123X','00000000000','format@example.com','格','式测试'),config)
                     assert adapter.identity_filled and await session.page.evaluate('window.continues')==1
+                    assert await session.page.evaluate('window.regions')==1
                     # Real Qt submit input must work from a hidden window with
                     # a checkout-confirmed store omitted from the Review text.
                     receipts=[]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QScrollArea, QWidget
 from app.services.readiness import PreparationItem
+from app.platforms.runtime import fit_dialog
 
 
 class PreparationDialog(QDialog):
@@ -29,6 +30,7 @@ class PreparationDialog(QDialog):
             row.addWidget(button); rows.addWidget(card)
         rows.addStretch(); scroll.setWidget(content); layout.addWidget(scroll, 1)
         close = QPushButton('返回控制台'); close.clicked.connect(self.close); layout.addWidget(close)
+        fit_dialog(self)
 
     def choose(self, item, navigate):
         self.close()

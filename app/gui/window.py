@@ -551,6 +551,9 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             if data.get('kind') in ('embedded','chrome','daily_chrome'):
                 self.browser_kind.setCurrentIndex(self.browser_kind.findData(data['kind']))
                 self.show_active_browser(data['kind'])
+        elif kind=='browser_page':
+            self.browser_label.setText(data['browser']+' · 当前页：'+data['page'])
+        elif kind=='browser_focus_status':self.message_label.setText(data)
         elif kind=='price_confirmation':self.show_price_choice(data)
         elif kind=='price_confirmed':self.console_log.appendPlainText(f'已接受本次官网价格：RMB {float(data["amount"]):,.2f}')
         elif kind=='consent_status':self.console_log.appendPlainText('隐私确认：'+data)
@@ -578,6 +581,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         elif kind=='bag_reused':self.console_log.appendPlainText(data['message'])
         elif kind=='pickup_changed':self.console_log.appendPlainText('结账取货门店已切换：'+data['previous']+' → '+data['store']+'；购物袋商品保留')
         elif kind=='checkout_pickup':self.console_log.appendPlainText(data['message']+'：'+data['store'])
+        elif kind=='checkout_region':self.console_log.appendPlainText(data['message']+'：'+data['city']+' '+data['district'])
         elif kind=='checkout_page':
             stage={'loading':'正在加载','guest':'账户或游客入口','consent':'隐私声明','pickup':'取货门店','pickup_unavailable':'取货门店缺货，检查备用门店',
                    'contact':'取货资料','payment':'付款方式','review':'最终核对'}.get(data['stage'],'正在加载')
@@ -669,6 +673,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.browser_session_note.setText('浏览器会话已关闭；下一次诊断使用所选浏览器。')
         self.session_open=False;self.login_observation=None;self.close_session_button.setEnabled(False)
         self.login_label.setText('浏览器会话已关闭；重新打开后检查登录')
+        self.browser_label.setText('暂无运行的浏览器')
         for dialog in (self.price_dialog,self.consent_dialog):
             if dialog:dialog.close()
         self.stop_button.setEnabled(False);self.resume_button.setEnabled(False);self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.refresh_preparation()

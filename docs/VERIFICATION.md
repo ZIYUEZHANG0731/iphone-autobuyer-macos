@@ -4,6 +4,14 @@
 
 ## 环境与可运行产物
 
+### v0.7.6 / build 47 Windows 登录检查与分发
+
+Windows 最终完整回归 **544 passed / 3 macOS skipped / 281.17 秒**，冻结环境、GUI、内置 renderer 和合成单次订单分发自检全部通过，完整便携 ZIP 已生成。商店/购物袋账户复核沿当前官网入口，Windows 原生网络采样、近期诊断保留和所选页提示均有回归证据。真实日常 Chrome 扩展已接入，但旧安装版账户结账仍要求重新认证；独立 Chrome 认证提交 503 的根因及新版真实核对页结果未确认。没有新增真实 Apple 订单或付款。完整证据与新版包路径见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)，地区、语言和认证请求对照见 [登录诊断](LOGIN_DIAGNOSIS.md)。
+
+### v0.7.6 / build 46 Windows 真机
+
+Windows 11 x64、普通未提升权限用户、Python 3.12.14、Qt 6.11.2。最终源码完整回归 **529 passed / 3 skipped / 278.98 秒**，仅跳过 macOS 专项；原生 ACL、运行锁崩溃恢复、Chrome / 内置 renderer 离线流程均执行。修复窄屏对话框、构建 DLL 搜索及 Windows 测试隔离，新增便携 ZIP 分发。build 46 补齐复用购物袋时缺失的取货地区选择，新增 5 项结账回归并扩展实际 Qt 内置夹具。真实公开供货读取成功；之后内置官网复用紫色 256GB iPhone 17 购物袋，确认环球港并进入取货信息页，停在手机验证，尚未到核对页。完整产物、登录边界及证据见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。没有创建真实 Apple 订单或付款。
+
 ### v0.7.6 / build 44 Windows 第一阶段（macOS 开发验证）
 
 - 分支 `codex/windows-port`，适配提交 **`f1104f905c754a05a56fbb20850958ef611dae1a`**；以 `05ba1efee6c0b5b21d9ec226c02abd63260c1844` 的 v0.7.5 / build 43 为回退基线。独立工作树开发，`main` 和已安装 Mac v0.7.5 / build 43 保留；本轮隔离回归前后核对的正式配置、密文、密钥及安装应用 metadata 快照一致。

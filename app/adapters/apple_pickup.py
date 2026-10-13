@@ -33,6 +33,44 @@ def available_store(row,config):
 
 
 class ApplePickup:
+    async def _set_missing_checkout_region(self,config):
+        # A reused bag can enter fulfillment without the product modal's
+        # region cookie. The observed fresh checkout button has aria-label
+        # "false", so identify its visible text rather than that broken name.
+        if self.checkout_last_continued:return
+        location=self.page.locator('button[aria-expanded]').filter(
+            has_text=re.compile(r'^\s*选择地区\s*$')).filter(visible=True)
+        if not await location.count():return
+        if await location.count()!=1:
+            raise UserAction('官网取货地区入口无法唯一确认，当前购物袋保留')
+        store=self.store_directory.enrich(next(s for s in config.stores if s.enabled))
+        if not all((store.province or store.city,store.city,store.district)):
+            raise UserAction('官网需要选择取货地区，请完善首选门店的省市和区县；当前购物袋保留')
+        try:
+            await self.checkout_updates.ready(self.control)
+            if await location.get_attribute('aria-expanded')!='true':
+                await location.evaluate('(button)=>button.click()')
+            province=self.page.get_by_role('tab',name=re.compile(r'省份|省\/市\/自治区')).filter(visible=True)
+            try:await expect(province).to_have_count(1,timeout=8000)
+            except AssertionError:
+                raise UserAction('官网取货省市标签无法唯一确认，当前购物袋保留')
+            if await province.get_attribute('aria-selected')!='true':
+                await province.evaluate('(button)=>button.click()')
+            panel=self.page.get_by_role('tabpanel').filter(visible=True)
+            await panel.get_by_role('button',name=store.province or store.city,exact=True).evaluate('(button)=>button.click()')
+            await self.guard()
+            if store.city!=(store.province or store.city):
+                await panel.get_by_role('button',name=store.city,exact=True).evaluate('(button)=>button.click()')
+                await self.guard()
+            await panel.get_by_role('button',name=store.district,exact=True).evaluate('(button)=>button.click()')
+            await expect(location).to_have_count(0,timeout=8000)
+            await self.checkout_updates.ready(self.control,label='取货地区')
+            self.progress('checkout_region',{'province':store.province,'city':store.city,
+                'district':store.district,'message':'已按首选门店设置缺失的取货地区，等待官网门店列表'})
+        except (AssertionError,PlaywrightError):
+            await self.guard()
+            raise UserAction('官网尚未确认取货地区，当前购物袋保留；请查看地区选择提示后继续') from None
+
     def checkout_stores(self,snapshot,config):
         preferences=[self.store_directory.enrich(s) for s in config.stores if s.enabled]
         if self.selected and config.allow_other_stores and not any(s.store_id==self.selected.store.store_id for s in preferences):
@@ -58,6 +96,7 @@ class ApplePickup:
         await self.focus_control(self.page)
         pickup=self.page.get_by_role('radio',name=re.compile(r'^(我要)?取货(?:\s|$)')).filter(visible=True)
         if await pickup.count()==1:await self._check_radio(pickup)
+        await self._set_missing_checkout_region(config)
         tried=set();initial_store_waited=False
         while True:
             await self.guard()

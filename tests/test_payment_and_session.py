@@ -212,18 +212,26 @@ def test_reopen_order_after_a_different_order_keeps_original_expiry(tmp_path):
     assert store.latest().expired()
 
 
-def test_frozen_app_uses_installed_browser_cache_without_overriding_user_setting(monkeypatch):
-    import os
-    import sys
-    from app.utils.browser_runtime import prepare_browser_runtime
-    monkeypatch.setattr(sys,'frozen',True,raising=False)
-    monkeypatch.setattr(sys,'platform','darwin')
-    monkeypatch.delenv('PLAYWRIGHT_BROWSERS_PATH',raising=False)
-    prepare_browser_runtime()
-    assert os.environ['PLAYWRIGHT_BROWSERS_PATH']==str(Path.home()/'Library'/'Caches'/'ms-playwright')
-    monkeypatch.setenv('PLAYWRIGHT_BROWSERS_PATH','/tmp/explicit-browser-cache')
-    prepare_browser_runtime()
-    assert os.environ['PLAYWRIGHT_BROWSERS_PATH']=='/tmp/explicit-browser-cache'
+@pytest.mark.parametrize('system', ['darwin', 'win32'])
+def test_frozen_app_uses_installed_browser_cache_without_overriding_user_setting(monkeypatch, tmp_path, system):
+    from types import SimpleNamespace
+    import app.platforms as platforms
+    import app.utils.browser_runtime as runtime
+    # Runtime writes to os.environ directly. A delenv on an absent variable
+    # registers no undo; a later setenv would restore the injected Mac path.
+    # Keep this fixture's environment and platform entirely local to the module.
+    environment = {}
+    monkeypatch.setattr(runtime, 'os', SimpleNamespace(environ=environment))
+    monkeypatch.setattr(runtime, 'sys', SimpleNamespace(frozen=True))
+    monkeypatch.setattr(platforms, 'sys', SimpleNamespace(platform=system))
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    runtime.prepare_browser_runtime()
+    expected = (Path.home()/'Library'/'Caches'/'ms-playwright' if system == 'darwin'
+                else tmp_path/'local'/'ms-playwright')
+    assert environment['PLAYWRIGHT_BROWSERS_PATH'] == str(expected)
+    environment['PLAYWRIGHT_BROWSERS_PATH'] = str(tmp_path / 'explicit browser cache')
+    runtime.prepare_browser_runtime()
+    assert environment['PLAYWRIGHT_BROWSERS_PATH'] == str(tmp_path / 'explicit browser cache')
 
 @pytest.mark.e2e
 async def test_account_maintenance_does_not_destroy_prelogged_browser_or_claim_login(browser):

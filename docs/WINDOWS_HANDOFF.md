@@ -2,6 +2,8 @@
 
 日期：2026-10-13。目标优先级：Windows 11 x64。
 
+> 后续 Windows 真机工作已在同分支推进到 v0.7.6 / build 47：源码全量 544 passed、3 项 macOS 专项跳过，已验证原生 ACL、电源 API、两类浏览器离线流程与便携包。真实官网已确认环球港并进入取货信息页；只用账户重试仍待真实认证通过，日常 Chrome 扩展连接已经成立。缺失取货地区的自动选择、当前账户入口复核和 Windows 网络诊断均已补齐。最新证据及剩余核对验收见 [Windows 第二阶段验收](WINDOWS_VERIFICATION.md)。下面的第一阶段描述保留为历史基线。
+
 - 分支：[`codex/windows-port`](https://github.com/ZIYUEZHANG0731/iphone-autobuyer-macos/tree/codex/windows-port)。
 - 适配及测试提交：`f1104f905c754a05a56fbb20850958ef611dae1a`（v0.7.6 / build 44）；本交接文档随后在同分支追加。克隆后用 `git log -2 --oneline` 查看代码提交和文档提交，用 `git rev-parse HEAD` 记录本次验收实际版本。
 - 可回退的已验证 Mac 基线：`05ba1efee6c0b5b21d9ec226c02abd63260c1844`，v0.7.5 / build 43；`main` 仍停在该提交。
@@ -112,7 +114,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\验收 工具\self-t
 
 ## 剩余问题及 Windows 11 x64 验收清单
 
-以下全部为 **待验**；按源码、打包、真实官网三组分别留证。已有 Mac 合成测试不能勾选 Windows 通过。
+以下是第一阶段交接时的 **待验清单**；Windows 第二阶段的已验结果和剩余部分见 [当前验收](WINDOWS_VERIFICATION.md)。按源码、打包、真实官网三组分别留证，已有 Mac 合成测试不能勾选 Windows 通过。
 
 | 类别 | 待验内容 | 通过判据/证据 |
 | --- | --- | --- |

@@ -74,6 +74,25 @@ async def test_missing_extension_does_not_launch_a_replacement_profile(monkeypat
     assert bridge.process is None
 
 
+async def test_browser_focus_feedback_describes_selected_page_without_private_url(tmp_path):
+    import asyncio
+    from app.gui.worker import Worker
+    config=Settings(browser_kind='daily_chrome')
+    worker=Worker('login_check',config,tmp_path)
+    selected=SimpleNamespace(url='https://secure9.www.apple.com.cn/shop/signIn?ssi=PRIVATE_CONTEXT')
+    async def focus(_page=None):
+        worker.control.stop_event.set()
+    session=SimpleNamespace(page=selected,label='日常 Chrome（沿用原有登录）',
+                            ensure_page=AsyncMock(return_value=selected),focus_page=focus)
+    events=[];worker.data.connect(lambda kind,data:events.append((kind,data)))
+    worker.focus_requested.set()
+    await asyncio.wait_for(worker.watch_payment(session,None),3)
+    feedback=next(data for kind,data in events if kind=='browser_focus_status')
+    assert 'Apple 账户登录页' in feedback and 'Playwright · iPhone AutoBuyer' in feedback
+    assert 'PRIVATE' not in str(events) and 'https://' not in str(events)
+    assert next(data for kind,data in events if kind=='browser_page')['page']=='Apple 账户登录页'
+
+
 async def test_waiting_for_extension_grant_is_cancellable_and_child_exits(tmp_path,monkeypatch):
     import app.services.daily_chrome as module
     from app.models.flow import Stopped
