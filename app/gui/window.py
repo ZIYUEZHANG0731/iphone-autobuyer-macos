@@ -24,6 +24,7 @@ from app.security.vault import IdentityVault, settings_for_disk
 from app.security.local_inputs import LocalInputs
 from app.gui.worker import Worker
 from app.gui.browser_controls import BrowserControls
+from app.gui.iaone import IAOneControls
 from app.gui.profiles import ProfileControls, ProfileDialog
 from app.gui.payment import PaymentDialog
 from app.gui.payment_settings import PaymentChoices
@@ -45,7 +46,7 @@ from app.utils.qt import single_shot
 from app.platforms.accessibility import prepare_accessibility
 
 
-class MainWindow(QMainWindow, BrowserControls, ProfileControls):
+class MainWindow(QMainWindow, BrowserControls, ProfileControls, IAOneControls):
     def __init__(self,root:Path):
         super().__init__();prepare_accessibility();self.root=root;self.redactor=Redactor();self.repo=Repository(root/'autobuyer.sqlite3',self.redactor)
         self.local_inputs=LocalInputs(root);self.input_restore_error=''
@@ -177,6 +178,8 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.preparation_summary=QLabel(self);self.preparation_summary.hide()
         self.start_website=self.button(row,'官网模拟下单',lambda:self.launch('website'),'primary')
         self.start_live=self.button(row,'开始抢购',lambda:self.launch('live'))
+        self.start_iaone=self.button(row,'IA ONE 到货下单',lambda:self.launch('iaone'))
+        self.start_iaone.setToolTip('提前选好配置并停留；按到货事件运行，不等待预约时间。匹配当前商品和允许门店后自动核对并下单。')
         l.addLayout(row);l.addWidget(divider())
         row=QHBoxLayout();row.setSpacing(16);self.metrics={}
         self.state_dot=QLabel('●');self.state_dot.setObjectName('stateDot');row.addWidget(self.state_dot)
@@ -230,6 +233,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.close_session_button=self.button(row,'关闭会话',self.close_session);self.close_session_button.setEnabled(False);r.addLayout(row)
         self.keep_awake=QCheckBox('会话期间防止电脑自动睡眠');r.addWidget(self.keep_awake)
         self.keep_awake.setToolTip('建议连接电源。停止任务会保留浏览器会话，关闭会话才会退出浏览器。')
+        self.build_iaone(r)
         r.addWidget(divider());self.label(r,'停止任务会保留浏览器会话。','muted');r.addSpacing(8);r.addWidget(divider())
         row=QHBoxLayout();self.button(row,'查看付款二维码',self.show_payment);self.button(row,'提取当前付款码',self.request_payment);r.addLayout(row)
         self.help_button=self.button(r,'使用帮助',self.show_help,'link');self.help_button.setIcon(outline_icon('help','#007aff'))
@@ -472,17 +476,28 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
                 self.config=config;self.repo.save_config(config)
             else:
                 config=self.collect()
-                if action in ('website','live'):
+                if action=='iaone':
+                    if not self.iaone_tokens.load():
+                        self.message_label.setText('请先连接 IA ONE，再启动到货下单。');self.configure_iaone();return
+                    if not config.auto_submit:
+                        self.message_label.setText('请在“付款与授权”启用自动提交，再启动到货下单。');self.stack.setCurrentIndex(3);return
+                if action in ('website','live','iaone'):
                     mode=Mode.WEBSITE_DRY_RUN if action=='website' else Mode.LIVE
-                    items=self.preparation_for(config,mode)
+                    # Restock mode waits on the event rather than an old saved
+                    # launch date; keep the date in the user's saved plan.
+                    run_config=deepcopy(config)
+                    if action=='iaone':run_config.starts_at=''
+                    items=self.preparation_for(run_config,mode)
                     if any(item.blocks for item in items):
                         self.message_label.setText('请先处理准备清单中的缺失项。');self.show_preparation(mode=mode,items=items);return
-                    config.validate(mode)
+                    run_config.validate(mode)
                 self.config=config;self.repo.save_config(config)
             if action=='stores' and not any(s.enabled for s in config.stores):
                 self.message_label.setText('请先从内置目录添加并启用门店，再检查当前商品库存。');self.stack.setCurrentIndex(1);return
-        except (ConfigError,ValueError) as exc:QMessageBox.information(self,'请检查配置',str(exc));return
+        except (ConfigError,ValueError,FlowError) as exc:QMessageBox.information(self,'请检查配置',str(exc));return
         self.clear_consent()
+        if action=='iaone':
+            config=deepcopy(config);config.starts_at=''
         if running:
             if getattr(self.worker,'session_kind','embedded' if getattr(self.worker,'embedded',None) else 'chrome')!=config.browser_kind:
                 self.message_label.setText('当前会话仍在使用原来的浏览器。请关闭会话，再按所选模式打开。');return
@@ -494,11 +509,11 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             except (FlowError,ConfigError) as error:self.message_label.setText(str(error));return
             self.worker=Worker(action,config,self.root,parent=self,embedded=embedded);self.worker.event.connect(self.on_event);self.worker.data.connect(self.on_data);self.worker.completed.connect(self.on_completed);self.worker.finished.connect(self.on_finished)
             self.worker.start()
-        self.stop_button.setEnabled(True);self.close_session_button.setEnabled(True);self.resume_button.setEnabled(False);self.start_website.setEnabled(False);self.start_live.setEnabled(False)
+        self.stop_button.setEnabled(True);self.close_session_button.setEnabled(True);self.resume_button.setEnabled(False);self.start_website.setEnabled(False);self.start_live.setEnabled(False);self.start_iaone.setEnabled(False)
         self.browser_kind.setEnabled(False)
         self.entry_strategy.setEnabled(False)
         self.last_state='PREPARING'
-        labels={'website':'官网试跑 · 到核对页停止','live':'真实购买','environment':'环境检查','install':'浏览器安装',
+        labels={'website':'官网试跑 · 到核对页停止','live':'真实购买','iaone':'IA ONE 到货后自动下单','environment':'环境检查','install':'浏览器安装',
                 'login':'预登录','login_check':'登录复核','login_diagnosis':'登录问题诊断','catalog':'商品目录','options':'商品选项',
                 'stores':'门店查询','bag':'购物袋诊断','receipt':'订单核对','local':'本地异常测试 · 合成数据'}
         self.banner.setText(labels.get(action,'Apple 官网 · 软件浏览器'))
@@ -517,7 +532,12 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
             self.tray.showMessage('Apple AutoBuyer',message,QSystemTrayIcon.MessageIcon.Information,10000)
     @Slot(str,object)
     def on_data(self,kind,data):
-        if kind=='catalog':
+        if kind=='iaone':
+            self.iaone_status.setText(data['message'])
+            self.console_log.appendPlainText(data['message'])
+            if data['state']=='reconnecting':
+                self.tray.showMessage('IA ONE 连接待恢复',data['message'],QSystemTrayIcon.MessageIcon.Information,10000)
+        elif kind=='catalog':
             self.catalog=data;self.catalog_cache.save(data);self.product_choices.replace_offers(data);self.catalog_selected(self.name.currentIndex())
         elif kind=='options':
             groups=groups_from_controls(data)
@@ -594,7 +614,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         elif kind=='session':
             self.browser_kind.setEnabled(True)
             self.entry_strategy.setEnabled(True)
-            self.session_open=True;self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.resume_button.setEnabled(False);self.stop_button.setEnabled(False);self.close_session_button.setEnabled(True)
+            self.session_open=True;self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.start_iaone.setEnabled(True);self.resume_button.setEnabled(False);self.stop_button.setEnabled(False);self.close_session_button.setEnabled(True)
             self.banner.setText('官网浏览器会话保持打开');self.console_log.appendPlainText(data['message'])
         elif kind=='payment_qr':
             self.message_label.setText(f'订单尾号 {data["order_id"][-4:]} 的官网付款码已提取；付款结果以官网为准')
@@ -674,7 +694,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.login_label.setText('浏览器会话已关闭；重新打开后检查登录')
         for dialog in (self.price_dialog,self.consent_dialog):
             if dialog:dialog.close()
-        self.stop_button.setEnabled(False);self.resume_button.setEnabled(False);self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.refresh_preparation()
+        self.stop_button.setEnabled(False);self.resume_button.setEnabled(False);self.start_website.setEnabled(True);self.start_live.setEnabled(True);self.start_iaone.setEnabled(True);self.refresh_preparation()
         if self.closing:self.close()
         elif self.pending_browser_action:
             action=self.pending_browser_action;self.pending_browser_action=None;single_shot(self,0,lambda:self.launch(action))
@@ -744,7 +764,7 @@ class MainWindow(QMainWindow, BrowserControls, ProfileControls):
         self.update_resume()
         if time.monotonic()>=self.preparation_refresh_at:self.refresh_preparation()
     def closeEvent(self,event):
-        if not self.closing and self.worker and self.worker.isRunning() and (self.worker.session_open or getattr(self.worker,'action','') in ('login','login_check','login_diagnosis','catalog','stores','options','website','live','receipt')):
+        if not self.closing and self.worker and self.worker.isRunning() and (self.worker.session_open or getattr(self.worker,'action','') in ('login','login_check','login_diagnosis','catalog','stores','options','website','live','iaone','receipt')):
             self.hide();event.ignore()
             self.tray.showMessage('AutoBuyer 继续运行','登录会话和任务保留。点击菜单栏图标恢复窗口；退出软件才会结束运行。',QSystemTrayIcon.MessageIcon.Information,5000)
         elif self.worker and self.worker.isRunning():self.closing=True;self.close_session();event.ignore()

@@ -7,7 +7,7 @@ from uuid import uuid4
 from contextlib import nullcontext
 from app.models.config import Settings, Identity, Mode, State, STATE_LABELS, ConfigError
 from app.models.flow import (StateMachine, RunResult, Receipt, FlowError, UserAction, Unavailable,
-                             SubmissionUnknown, Stopped, Availability, RateLimited)
+                             SubmissionUnknown, Stopped, Availability, RateLimited, PickupUnavailable)
 from app.automation.control import Control, ProcessLock
 from app.services.storage import Repository
 from app.utils.scheduling import future_start
@@ -45,7 +45,10 @@ class Engine:
                 task=asyncio.create_task(func())
                 try:
                     while not task.done():
-                        await self.control.sleep(.1)
+                        self.control.check()
+                        # Finish immediately when the operation/event completes;
+                        # the timeout only bounds cancellation latency.
+                        await asyncio.wait({task}, timeout=.1)
                     return await task
                 finally:
                     if not task.done():
@@ -82,7 +85,7 @@ class Engine:
             if match: return match
         return acceptable[0] if acceptable and config.allow_other_stores else None
 
-    async def run(self,config:Settings,adapter,mode:Mode,identity:Identity|None=None):
+    async def run(self,config:Settings,adapter,mode:Mode,identity:Identity|None=None,*,restock=None):
         self.mode=mode
         self.intent=config.intent_id if mode==Mode.LIVE else f"{mode}:{self.run_id}"
         try:
@@ -149,7 +152,20 @@ class Engine:
                 self.emit(State.STORE_OPEN,"购买页面可访问；继续验证配置和自提")
                 await self.operation(lambda:adapter.select_product(config))
                 self.emit(State.PRODUCT_SELECTED,"已选择并检查商品配置")
-                resumed_cart=await self.operation(lambda:adapter.resume_cart(config)) if hasattr(adapter,'resume_cart') else False
+                async def wait_restock(*,restore_product=True):
+                    self.emit(State.PRODUCT_SELECTED,'保留当前页面等待 IA ONE 到货；收到匹配信号后自动继续')
+                    await self.operation(restock.wait)
+                    if restore_product and hasattr(adapter,'resume_product'):
+                        await self.operation(lambda:adapter.resume_product(config))
+                if restock is not None:
+                    await wait_restock()
+                direct_checkout=restock is not None and hasattr(adapter,'begin_checkout')
+                if direct_checkout:
+                    await self.operation(lambda:adapter.begin_checkout(config))
+                    resumed_cart=True
+                    self.emit(State.PRODUCT_SELECTED,'到货信号已匹配，直接进入购物袋；只在结账页确认门店和时段，不查询商品页库存弹窗')
+                else:
+                    resumed_cart=await self.operation(lambda:adapter.resume_cart(config)) if hasattr(adapter,'resume_cart') else False
                 selected=None
                 if resumed_cart:
                     self.emit(State.PRODUCT_SELECTED,'已有购物袋核对通过；在当前结账页选择允许的取货门店，不重新加购')
@@ -159,14 +175,28 @@ class Engine:
                         states=await self.operation(lambda:adapter.availability(config))
                         selected=self.choose_store(config,states)
                         if selected: break
-                        if config.no_stock=='stop' or time.monotonic()>deadline:
+                        if config.no_stock=='stop' or (restock is None and time.monotonic()>deadline):
                             raise Unavailable("所有允许的门店均无可接受的自提选项；未切换配送")
+                        if restock is not None:
+                            self.emit(State.PRODUCT_SELECTED,'到货信号已收到，但官网当前门店仍无货；保留配置，等待下一次信号')
+                            await wait_restock()
+                            continue
                         self.emit(State.PRODUCT_SELECTED,f"允许的门店暂不可取货；{stock_delay:.1f} 秒后重新查询，会话保留")
                         await self.control.sleep(stock_delay)
                         stock_delay=min(config.max_interval,stock_delay*1.8)
                     await self.operation(lambda:adapter.select_pickup(selected,config))
                     self.emit(State.PICKUP_SELECTED,f"已选择 {selected.store.name}；库存尚未锁定")
-                await self.operation(lambda:adapter.fill_customer(identity,config))
+                async def fill_at_checkout():
+                    while True:
+                        try:
+                            return await adapter.fill_customer(identity,config)
+                        except PickupUnavailable as exc:
+                            if not direct_checkout:raise
+                            if config.no_stock=='stop':raise Unavailable(str(exc)) from None
+                            self.emit(State.PRODUCT_SELECTED,'当前结账页没有允许的门店与时段组合；购物袋保留，不反复进出查库存，等待下一次到货信号')
+                            await wait_restock(restore_product=False)
+                            await adapter.refresh_checkout_pickup(config)
+                await self.operation(fill_at_checkout)
                 actual=getattr(adapter,'selected',None)
                 if resumed_cart or (isinstance(actual,Availability) and actual.store.store_id!=selected.store.store_id):
                     if not isinstance(actual,Availability) or not actual.available:

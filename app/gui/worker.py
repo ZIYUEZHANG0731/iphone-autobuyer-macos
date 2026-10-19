@@ -27,6 +27,7 @@ from app.utils.power import KeepAwake
 from app.services.catalog_reader import read_catalog
 from app.services.traffic import SiteCooldown
 from app.services.signin import SignInController
+from app.services.iaone import IAOneClient, IAOneTokenStore, RestockMonitor
 from app.services.login import apple_auth_url, shop_signin_url, session_page_url
 from app.services.network_diagnosis import NetworkDiagnosis
 from app.platforms import system_label, vault_label
@@ -217,8 +218,8 @@ class Worker(QThread):
             return credential
         login_options=dict(login_config=self.config,credential_provider=read_credential,
                            sign_in=self.sign_in,page_focus=getattr(session,'focus_page',None))
-        mode = Mode.LIVE if self.action == 'live' else Mode.WEBSITE_DRY_RUN
-        if self.action in ('website', 'live'):
+        mode = Mode.LIVE if self.action in ('live','iaone') else Mode.WEBSITE_DRY_RUN
+        if self.action in ('website', 'live','iaone'):
             self.review_data = {}
             if self.config.profile_id and self.config.transmit_identity:
                 self.status('正在使用软件中已填写的取货资料，不读取钥匙串')
@@ -230,6 +231,29 @@ class Worker(QThread):
         adapter = AppleAdapter(session.page, self.control, mode=mode, progress=self.progress,page_factory=getattr(session,'new_page',None),page_closer=getattr(session,'close_page',None),prepare_bag=self.config.browser_kind in ('embedded','chrome'),**login_options)
         self.active_adapter = adapter
         try:
+            if self.action == 'iaone':
+                self.config.starts_at=''
+                if not self.config.auto_submit:
+                    raise UserAction('请先在“付款与授权”启用自动提交，再启动 IA ONE 到货下单')
+                token=IAOneTokenStore(self.root).load()
+                if not token:
+                    raise UserAction('请先在控制台连接 IA ONE')
+                self.progress('iaone',{'state':'connecting','message':'正在连接 IA ONE，并准备当前商品配置…'})
+                try:
+                    async with IAOneClient(session.playwright,token) as client:
+                        engine=Engine(repo,self.control,callback=self.event.emit,lock_held=True)
+                        monitor=RestockMonitor(client,self.root,self.config,
+                            progress=lambda data:self.progress('iaone',data))
+                        try:
+                            # The initial watchlist/baseline requests must also
+                            # remain cancellable while connecting to IA ONE.
+                            await engine.operation(monitor.__aenter__)
+                            self.progress('iaone',{'state':'listening','message':'IA ONE 已连接，持续等待当前配置和门店的到货信号'})
+                            return asdict(await engine.run(self.config,adapter,mode,identity,restock=monitor))
+                        finally:
+                            await monitor.__aexit__()
+                finally:
+                    self.progress('iaone',{'state':'stopped','message':'IA ONE 本次监听已结束；官网浏览器会话保留'})
             if self.action in ('website', 'live'):
                 return asdict(await Engine(repo, self.control, callback=self.event.emit, lock_held=True).run(self.config, adapter, mode, identity))
             if self.action == 'catalog':

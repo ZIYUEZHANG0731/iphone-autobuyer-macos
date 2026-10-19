@@ -257,7 +257,14 @@ def test_full_payment_shows_no_term_and_restores_bank_preference(qt,tmp_path):
     finally:window.close();window.deleteLater();qt.processEvents()
 
 
-def test_official_duo_time_can_be_selected_without_typing_or_changing_the_instant(qt,tmp_path):
+def test_official_duo_time_can_be_selected_without_typing_or_changing_the_instant(qt,tmp_path,monkeypatch):
+    import app.gui.window as module
+    class BeforeLaunch(datetime):
+        @classmethod
+        def now(cls,tz=None):
+            value=datetime(2026,10,11,12,tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+    monkeypatch.setattr(module,'datetime',BeforeLaunch)
     window=MainWindow(tmp_path)
     try:
         window.product_choices.model.setCurrentIndex(window.product_choices.model.findText('iPhone Duo'))

@@ -17,6 +17,7 @@ class SimulationAdapter:
     async def reload(self):
         await self.page.reload(wait_until='domcontentloaded')
     async def select_product(self,config):
+        await self.page.get_by_role('heading',name='选择商品',exact=True).wait_for(timeout=1500)
         for k,v in config.product.options.items():
             choices=await self.page.get_by_label(k,exact=True).locator('option').all_text_contents()
             if v not in choices: raise FlowError('模拟商品配置不存在')
@@ -42,6 +43,9 @@ class SimulationAdapter:
             if await loc.input_value()!=value: raise FlowError('模拟表单未接受字段')
         await self.page.get_by_role('button',name='继续选择付款方式',exact=True).click()
     async def select_payment(self,config):
+        # The preceding button starts an async fetch. Observe the resulting
+        # stage instead of depending on the engine's old fixed 100ms pause.
+        await self.page.get_by_role('heading',name='选择付款方式',exact=True).wait_for(timeout=1500)
         for p in config.payments:
             loc=self.page.get_by_role('radio',name=p,exact=True)
             if await loc.count() and await loc.is_enabled():

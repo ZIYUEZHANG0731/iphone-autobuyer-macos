@@ -463,6 +463,16 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
         if prices:await self.accept_price(config,max(prices)*config.product.quantity)
         self.progress('options',choices)
 
+    async def resume_product(self,config):
+        # The same adapter/page remains alive while waiting for IA ONE. A
+        # normal signal does not reload it or restart browser/login. If the
+        # tab was navigated away, restore the saved public configuration first.
+        if not family_url(self.page.url) or family_url(self.page.url)!=family_url(config.product.url):
+            await self.prepare(config)
+            if not await self.is_open():
+                raise UserAction('到货信号已收到，但购买页暂时不可用；当前会话保留，请查看官网提示')
+        await self.select_product(config)
+
     async def _check_product_continue(self,button):
         # Capacity selection can replace the generic model stage by the final
         # product page. Do not keep waiting on its now-removed Continue button.
@@ -644,8 +654,24 @@ class AppleAdapter(AppleLogin, AppleConsent, ApplePickup):
             await self._check_radio(dialog.get_by_role('radio',name=re.compile(re.escape(availability.store.name))))
             await dialog.get_by_role('button',name='继续',exact=True).click()
         self.selected=availability
+        await self._add_configured_product(config)
+
+    async def begin_checkout(self,config):
+        """Use a restock signal to enter checkout, without the public stock modal.
+
+        A saved store is only a preference. Current availability and the slot
+        are confirmed by the fulfillment page, after the item is in the bag.
+        """
+        await self.guard()
+        if self.cart_checked or await self.resume_cart(config):return
+        preferred=next((s for s in config.stores if s.enabled),None)
+        if not preferred:raise UserAction('请先设置允许的取货门店；未加购')
+        self.selected=Availability(self.store_directory.enrich(preferred),False,'在结账页核对门店和可用取货时段')
+        await self._add_configured_product(config,bag_checked=True)
+
+    async def _add_configured_product(self,config,*,bag_checked=False):
         if not self.add_attempted:
-            if await self.resume_cart(config):return
+            if not bag_checked and await self.resume_cart(config):return
             self.add_attempted=True
             try:
                 await self.page.get_by_role('button',name='添加到购物袋',exact=True).click()

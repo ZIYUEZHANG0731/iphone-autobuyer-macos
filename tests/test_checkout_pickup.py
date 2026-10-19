@@ -153,6 +153,49 @@ async def test_no_pickup_slots_preserves_checkout_without_consuming_the_continue
     assert not adapter.add_attempted and adapter.checkout_pickup_confirmed is None
 
 
+async def test_slot_control_and_options_can_arrive_after_store_save_without_reselecting(checkout_page):
+    page=checkout_page
+    body=pickup_html().replace('onchange="document.getElementById(\'next\').disabled=false"',
+        '''onchange="window.storeSelections++;setTimeout(()=>{
+          document.getElementById('times').innerHTML=window.slotHTML;
+          setTimeout(()=>document.getElementById('time').insertAdjacentHTML('beforeend',
+            '<option value=morning>10:15 – 10:30</option>'),150)
+        },150)"''').replace('<button id="next"','<div id="times"></div><button id="next"')
+    await page.set_content(body)
+    await page.evaluate('''html=>{window.storeSelections=0;window.slotChanges=0;window.slotHTML=html}''',
+      '''<label>签到时段<select id="time" required onchange="window.slotChanges++;document.getElementById('next').disabled=false">
+      <option value="" disabled selected>可选时段</option></select></label>''')
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),settings()),4)
+    assert await page.evaluate('window.storeSelections')==1
+    assert await page.evaluate('window.slotChanges')==1
+    assert await page.evaluate('window.pickupClicks')==1 and adapter.identity_filled
+    assert not adapter.add_attempted
+
+
+async def test_store_with_no_slots_falls_back_to_an_allowed_store_in_the_same_checkout(checkout_page):
+    page=checkout_page
+    await page.set_content(r'''<main><h1>选择取货零售店</h1>
+      <label><input type="radio" name="store" value="R359" onchange="window.chooseStore(this.value)">Apple 南京东路 今天可取货</label>
+      <label><input type="radio" name="store" value="R401" onchange="window.chooseStore(this.value)">Apple 上海环贸 iapm 今天可取货</label>
+      <div id="times"></div><button id="next" disabled onclick="window.continued++;
+        document.querySelector('main').innerHTML=window.contactHTML">继续填写取货详情</button></main>
+      <script>window.storeSelections=[];window.slotChanges=0;window.continued=0;
+      window.chooseStore=id=>{window.storeSelections.push(id);document.getElementById('next').disabled=true;
+        document.getElementById('times').innerHTML='<label>签到时段<select required onchange="window.slotChanges++;document.getElementById(\'next\').disabled=false">'+
+          '<option value="" disabled selected>可选时段</option><option value="morning" '+
+          (id==='R359'?'disabled':'')+'>10:15 – 10:30</option></select></label>'}
+      </script>''')
+    await page.evaluate('html=>window.contactHTML=html',CONTACT)
+    adapter=adapter_for(page)
+    await asyncio.wait_for(adapter.fill_customer(contact(),fallback_settings()),4)
+    assert await page.evaluate('window.storeSelections')==['R359','R401']
+    assert await page.evaluate('window.slotChanges')==1
+    assert await page.evaluate('window.continued')==1
+    assert adapter.selected.store.store_id=='R401' and adapter.identity_filled
+    assert not adapter.add_attempted
+
+
 @pytest.mark.parametrize('saved',[True,False])
 async def test_pickup_slot_save_finishes_before_continue_and_a_failed_save_preserves_checkout(checkout_page,saved):
     page=checkout_page
@@ -350,6 +393,16 @@ async def test_checkout_fallback_honors_the_saved_priority_instead_of_dom_order(
     assert await page.evaluate('window.continued')==['R401']
 
 
+async def test_allowed_other_store_can_be_selected_directly_from_checkout(checkout_page):
+    page=checkout_page;await page.set_content(fulfillment_html(primary_disabled=True))
+    config=settings();config.allow_other_stores=True
+    adapter=adapter_for(page)
+    await adapter.fill_customer(contact(),config)
+    assert adapter.selected.store.store_id=='R390'
+    assert await page.evaluate('window.continued')==['R390']
+    assert not adapter.add_attempted
+
+
 async def test_disabled_preferences_and_unlisted_available_stores_are_not_chosen(checkout_page):
     page=checkout_page;await page.set_content(fulfillment_html(primary_disabled=True))
     config=fallback_settings();config.stores[1].enabled=False
@@ -366,6 +419,31 @@ async def test_stock_rejection_after_fulfillment_continue_switches_stores_in_the
     assert await page.evaluate('window.continued')==['R359','R401']
     assert adapter.checkout_continued_stores=={'R359','R401'}
     assert adapter.selected.store.store_id=='R401' and adapter.identity_filled
+
+
+async def test_new_signal_refreshes_only_the_same_checkout_without_readding(checkout_page):
+    page=checkout_page;requests=[]
+    async def refresh(route):
+        requests.append((route.request.method,route.request.url))
+        await route.fulfill(content_type='text/html; charset=utf-8',body=fulfillment_html())
+    await page.route('**/shop/checkout?*',refresh)
+    await page.set_content(fulfillment_html(primary_disabled=True))
+    adapter=adapter_for(page)
+    adapter.cart_checked=True
+    adapter.checkout_last_continued='R359';adapter.checkout_continued_stores={'R359'}
+    await adapter.refresh_checkout_pickup(settings())
+    await adapter.fill_customer(contact(),settings())
+    assert requests==[('GET','https://secure.www.apple.com.cn/shop/checkout?_s=Fulfillment-init')]
+    assert adapter.cart_checked and not adapter.add_attempted
+    assert adapter.selected.store.store_id=='R359' and adapter.identity_filled
+    assert await page.evaluate('window.continued')==['R359']
+
+
+async def test_restock_refresh_cannot_reload_a_later_checkout_stage(checkout_page):
+    page=checkout_page;adapter=adapter_for(page)
+    with pytest.raises(UserAction,match='离开取货选择'):
+        await adapter.refresh_checkout_pickup(settings())
+    assert not adapter.add_attempted and not adapter.pickup_continue_attempted
 
 
 async def test_uncertain_fulfillment_navigation_does_not_repeat_or_switch_an_available_store(checkout_page):

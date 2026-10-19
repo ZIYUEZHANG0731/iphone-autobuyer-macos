@@ -31,3 +31,4 @@ login-diagnostic*.json
 checkout-diagnostic*.json
 pickup-diagnostic*.json
 bag-diagnostic*.json
+iaone-state.json
